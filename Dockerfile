@@ -6,20 +6,25 @@ ENV \
     # sets the interval (in seconds) to rebuild tor circuits
     TOR_REBUILD_INTERVAL=1800
 
-EXPOSE 3128/tcp 4444/tcp
+EXPOSE 3128/tcp 4444/tcp 5000/tcp
 
-COPY tor.cfg privoxy.cfg haproxy.cfg start.sh bom.sh /
+COPY tor.cfg privoxy.cfg haproxy.cfg start.sh start_with_admin.sh bom.sh admin_panel.py requirements.txt ./
+COPY templates/ templates/
 
 RUN apk --no-cache --no-progress --quiet upgrade && \
     # alpine has a POSIX sed from busybox, for the log re-formatting, GNU sed is required to converting a capture group to lowercase
-    apk --no-cache --no-progress --quiet add tor bash privoxy haproxy curl sed && \
+    apk --no-cache --no-progress --quiet add tor bash privoxy haproxy curl sed python3 py3-pip && \
+    # Install Python dependencies using --break-system-packages for Alpine
+    pip3 install --no-cache-dir --break-system-packages -r requirements.txt && \
     #
     # directories and files
     mv /tor.cfg /etc/tor/torrc.default && \
     mv /privoxy.cfg /etc/privoxy/config.templ && \
     mv /haproxy.cfg /etc/haproxy/haproxy.cfg.default && \
     chmod +x /start.sh && \
+    chmod +x /start_with_admin.sh && \
     chmod +x /bom.sh && \
+    chmod +x /admin_panel.py && \
     #
     # prepare for low-privilege execution \
     addgroup proxy && \
@@ -58,4 +63,4 @@ STOPSIGNAL SIGINT
 
 USER proxy
 
-CMD ["/start.sh"]
+CMD ["/start_with_admin.sh"]
