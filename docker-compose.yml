@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  tor-proxy-admin:
+    build: .
+    container_name: tor-proxy-with-admin
+    ports:
+      - "3128:3128"  # HTTP proxy port
+      - "4444:4444"  # HAProxy stats
+      - "5000:5000"  # Admin panel
+    environment:
+      - TOR_INSTANCES=10
+      - TOR_REBUILD_INTERVAL=1800
+      # - TOR_EXIT_COUNTRY=US,GB,DE  # Optional: specify exit countries
+    volumes:
+      - tor_data:/var/local/tor
+      - privoxy_data:/var/local/privoxy
+    restart: unless-stopped
+    networks:
+      - tor_network
+
+networks:
+  tor_network:
+    driver: bridge
+
+volumes:
+  tor_data:
+  privoxy_data:

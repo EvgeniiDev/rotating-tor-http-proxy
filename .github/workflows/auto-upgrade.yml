@@ -1,0 +1,115 @@
+name: auto-upgrade
+
+on:
+  schedule:
+    - cron: '30 7,19 * * *'
+  workflow_dispatch:
+
+jobs:
+  auto-upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          ref: main
+      - name: Build Docker image
+        run: docker build --tag local-image .
+      - name: Compare BoM
+        id: compare-bom
+        shell: bash
+        run: |
+          CURRENT_BOM="$(cat ${GITHUB_WORKSPACE}/.github/bom.current)"
+          NEW_BOM="$(docker run --rm local-image /bom.sh)"
+          echo "Current BOM: ${CURRENT_BOM}"
+          echo "New BOM: ${NEW_BOM}"
+          echo "compare-bom-result=$(if [ "${CURRENT_BOM}" = "${NEW_BOM}" ]; then echo NOCHANGE; else echo CHANGED; fi)" >> $GITHUB_OUTPUT
+          echo "new-bom-data=${NEW_BOM}" >> $GITHUB_OUTPUT
+      - name: Update BOM record
+        if: ${{ success() && steps.compare-bom.outputs.compare-bom-result == 'CHANGED' }}
+        shell: bash
+        run: echo "${{ steps.compare-bom.outputs.new-bom-data }}" > ${GITHUB_WORKSPACE}/.github/bom.current
+      - name: Update README
+        if: ${{ success() && steps.compare-bom.outputs.compare-bom-result == 'CHANGED' }}
+        shell: bash
+        run: |
+          cat ${GITHUB_WORKSPACE}/README.md |tr '\n' '\r' |sed -r "s/(.*<!---\ BOM-starts\ --->\r).*/\1/" |tr '\r' '\n' > ${GITHUB_WORKSPACE}/~README.md
+          for i in ${{ steps.compare-bom.outputs.new-bom-data }}; do
+             echo "- ${i}" >> ${GITHUB_WORKSPACE}/~README.md
+          done
+          echo "<!--- BOM-ends. Document ends here too --->" >> ${GITHUB_WORKSPACE}/~README.md
+          mv -f ${GITHUB_WORKSPACE}/~README.md ${GITHUB_WORKSPACE}/README.md
+
+      - name: Build multi-platform image (setup QEMU)
+        if: ${{ success() && steps.compare-bom.outputs.compare-bom-result == 'CHANGED' }}
+        uses: docker/setup-qemu-action@v2
+      - name: Build multi-platform image (setup docker-buildx)
+        if: ${{ success() && steps.compare-bom.outputs.compare-bom-result == 'CHANGED' }}
+        uses: docker/setup-buildx-action@v2
+      - name: Login to Docker Hub
+        if: ${{ success() && steps.compare-bom.outputs.compare-bom-result == 'CHANGED' }}
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Dry-run version bumping to get the new version number
+        if: ${{ success() && steps.compare-bom.outputs.compare-bom-result == 'CHANGED' }}
+        id: tag_version_dryrun
+        uses: mathieudutour/github-tag-action@v6.1
+        with:
+          dry_run: true
+          # align the parameters here with the real run below
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+          tag_prefix: ''
+      - name: Build multi-platform image
+        if: ${{ success() && steps.compare-bom.outputs.compare-bom-result == 'CHANGED' }}
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm/v6,linux/arm/v7,linux/arm64
+          push: true
+          tags: zhaowde/rotating-tor-http-proxy:latest,zhaowde/rotating-tor-http-proxy:${{ steps.tag_version_dryrun.outputs.new_version }}
+
+      - name: Commit changes
+        if: ${{ success() && steps.compare-bom.outputs.compare-bom-result == 'CHANGED' }}
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: auto upgrade triggered by BoM changes
+          skip_fetch: true
+      - name: Bump version and push tag
+        if: ${{ success() && steps.compare-bom.outputs.compare-bom-result == 'CHANGED' }}
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.1
+        with:
+          # align the parameters here with the dry-run above
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+          tag_prefix: ''
+      - name: Create a release
+        if: ${{ success() && steps.compare-bom.outputs.compare-bom-result == 'CHANGED' }}
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.tag_version.outputs.new_tag }}
+          release_name: Release ${{ steps.tag_version.outputs.new_tag }}
+          body: ${{ steps.tag_version.outputs.changelog }}
+      - name: Merge (back) to develop branch
+        if: ${{ success() && steps.compare-bom.outputs.compare-bom-result == 'CHANGED' }}
+        uses: everlytic/branch-merge@1.1.5
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          source_ref: main
+          target_branch: develop
+      - name: Update the Docker Hub description
+        # For non-paid account, DockerHub has disabled the auto-build function, which is the prerequisite for
+        # auto-description update.
+        # We add this step here to update the description "manually."
+        if: ${{ success() && steps.compare-bom.outputs.compare-bom-result == 'CHANGED' }}
+        uses: peter-evans/dockerhub-description@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: zhaowde/rotating-tor-http-proxy
+          short-description: ${{ github.event.repository.description }}
