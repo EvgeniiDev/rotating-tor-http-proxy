@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""
-Tor Network Admin Panel
-Real-time management of Tor exit nodes and subnets
-"""
-
 import os
 import json
 import time

@@ -8,7 +8,7 @@ ENV \
 
 EXPOSE 3128/tcp 4444/tcp 5000/tcp
 
-COPY tor.cfg privoxy.cfg haproxy.cfg start.sh start_with_admin.sh bom.sh admin_panel.py requirements.txt ./
+COPY tor.cfg privoxy.cfg haproxy.cfg start.sh start_with_admin.sh admin_panel.py requirements.txt ./
 COPY templates/ templates/
 
 RUN apk --no-cache --no-progress --quiet upgrade && \
@@ -20,10 +20,8 @@ RUN apk --no-cache --no-progress --quiet upgrade && \
     # directories and files
     mv /tor.cfg /etc/tor/torrc.default && \
     mv /privoxy.cfg /etc/privoxy/config.templ && \
-    mv /haproxy.cfg /etc/haproxy/haproxy.cfg.default && \
-    chmod +x /start.sh && \
+    mv /haproxy.cfg /etc/haproxy/haproxy.cfg.default && \    chmod +x /start.sh && \
     chmod +x /start_with_admin.sh && \
-    chmod +x /bom.sh && \
     chmod +x /admin_panel.py && \
     #
     # prepare for low-privilege execution \
