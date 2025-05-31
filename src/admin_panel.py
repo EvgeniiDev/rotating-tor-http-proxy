@@ -6,15 +6,20 @@ import signal
 import logging
 import threading
 import subprocess
+import requests
+import re
 from datetime import datetime
 from collections import defaultdict
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
-import requests
-import re
 
-# Import our config manager
+# Import our config manager and models
 from config_manager import ConfigManager
+from models import (
+    SubnetData, Stats, ServiceStatus, ApiResponse,
+    SubnetRequest, ProxyTestResult, get_current_timestamp,
+    create_success_response, create_error_response
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,10 +39,9 @@ class TorNetworkManager:
         self.current_relays = {}
         self.services_started = False
         self.tor_processes = {}
-        self.privoxy_processes = {}
         self.subnet_tor_processes = {}  # subnet -> {instance_id: process}
-        self.subnet_privoxy_processes = {}  # subnet -> {instance_id: process}
         self.config_manager = ConfigManager()  # Initialize config manager
+        self.next_instance_id = 1  # Global instance ID counter - never resets, only increases
         self.stats = {
             'active_subnets': 0,
             'blocked_subnets': 0,
@@ -75,8 +79,6 @@ class TorNetworkManager:
                         })
         return relays
 
-
-
     def start_services(self):
         """Initialize infrastructure without starting Tor instances. Tor instances will be started on user request."""
         if self.services_started:
@@ -86,35 +88,30 @@ class TorNetworkManager:
         try:
             logger.info("Initializing services infrastructure...")
             
-            # Directories and permissions are already set up by Dockerfile            # Just verify that HAProxy is accessible for runtime management
+            # Directories and permissions are already set up by Dockerfile
+            # Just verify that HAProxy is accessible for runtime management
             if not self.config_manager.haproxy_manager.is_running():
                 logger.warning("HAProxy is not running. It should be started by the shell script.")
-
+                
             self.services_started = True
             self.stats['tor_instances'] = 0  # No instances started yet
-            self.stats['running_instances'] = 0
+            self.update_running_instances_count()  # Properly count any existing instances
 
             logger.info("Services infrastructure initialized successfully. HAProxy is managed by shell script. Tor instances can now be started on demand.")
             return True
 
         except Exception as e:
-            logger.error(f"Error initializing services infrastructure: {e}")
+            logger.error(f"Failed to initialize services infrastructure: {e}")
             return False
 
     def stop_services(self):
-        """Stop all Tor and Privoxy instances"""
+        """Stop all Tor instances"""
         try:
             # Stop Tor processes
             for i, process in self.tor_processes.items():
                 if process and process.poll() is None:
                     process.terminate()
                     logger.info(f"Stopped Tor instance {i}")
-
-            # Stop Privoxy processes
-            for i, process in self.privoxy_processes.items():
-                if process and process.poll() is None:
-                    process.terminate()
-                    logger.info(f"Stopped Privoxy instance {i}")
 
             # Stop subnet processes
             for subnet_key, processes in self.subnet_tor_processes.items():
@@ -123,749 +120,648 @@ class TorNetworkManager:
                         process.terminate()
                         logger.info(f"Stopped subnet Tor instance {instance_id}")
 
-            for subnet_key, processes in self.subnet_privoxy_processes.items():
-                for instance_id, process in processes.items():
-                    if process and process.poll() is None:
-                        process.terminate()
-                        logger.info(f"Stopped subnet Privoxy instance {instance_id}")
-
             self.tor_processes.clear()
-            self.privoxy_processes.clear()
             self.subnet_tor_processes.clear()
-            self.subnet_privoxy_processes.clear()
             self.active_subnets.clear()
-            
             # HAProxy stop is handled by shell script
-            
             self.services_started = False
-            self.stats['running_instances'] = 0
+            self.update_running_instances_count()  # Properly count remaining instances
 
             logger.info("All services stopped")
-            return True
 
         except Exception as e:
             logger.error(f"Error stopping services: {e}")
             return False
 
+        return True
+
     def get_service_status(self):
-        """Get current service status with detailed information"""
+        """Check status of all running services"""
         running_tor = 0
-        running_privoxy = 0
+        total_running = 0
         failed_instances = []
 
         # Check main Tor processes
         for instance_id, process in self.tor_processes.items():
             if process and process.poll() is None:
                 running_tor += 1
-            elif process and process.poll() is not None:
+            else:
                 failed_instances.append(f"tor-{instance_id}")
 
-        # Check main Privoxy processes
-        for instance_id, process in self.privoxy_processes.items():
-            if process and process.poll() is None:
-                running_privoxy += 1
-            elif process and process.poll() is not None:
-                failed_instances.append(f"privoxy-{instance_id}")
-
-        # Check subnet-specific processes
+        # Check subnet Tor processes
         subnet_running_tor = 0
-        subnet_running_privoxy = 0
+        total_subnet_instances = 0
 
         for subnet_key, processes in self.subnet_tor_processes.items():
             for instance_id, process in processes.items():
+                total_subnet_instances += 1
                 if process and process.poll() is None:
                     subnet_running_tor += 1
-                elif process and process.poll() is not None:
+                else:
                     failed_instances.append(f"subnet-tor-{instance_id}")
 
-        for subnet_key, processes in self.subnet_privoxy_processes.items():
-            for instance_id, process in processes.items():
-                if process and process.poll() is None:
-                    subnet_running_privoxy += 1
-                elif process and process.poll() is not None:
-                    failed_instances.append(f"subnet-privoxy-{instance_id}")
-
         total_running_tor = running_tor + subnet_running_tor
-        total_running_privoxy = running_privoxy + subnet_running_privoxy
-
+        total_running = total_running_tor
+        
         # Check HAProxy status
         haproxy_running = self.config_manager.haproxy_manager.is_running()
-
-        # Determine overall status
-        if self.services_started and total_running_tor > 0 and total_running_privoxy > 0 and haproxy_running:
-            if total_running_tor == self.stats.get('tor_instances', 0) and total_running_privoxy == self.stats.get('tor_instances', 0):
-                status = "running"
-            else:
-                status = "partial"
-        elif self.services_started or len(self.active_subnets) > 0:
-            status = "starting"
-        else:
-            status = "stopped"
-
-        return {
-            'status': status,
-            'services_started': self.services_started,
-            'running_tor': total_running_tor,
-            'running_privoxy': total_running_privoxy,
-            'haproxy_running': haproxy_running,
-            'total_instances': self.stats.get('tor_instances', 0),
-            'failed_instances': failed_instances,
-            'active_subnets': len(self.active_subnets),
-            'subnet_list': list(self.active_subnets),
-            'stats': self.stats.copy(),
-            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        }
+        
+        # Create ServiceStatus object
+        status = ServiceStatus(
+            services_started=self.services_started,
+            total_instances=len(self.tor_processes) + total_subnet_instances,
+            running_tor=total_running_tor,
+            running_socks=total_running_tor,  # Same as running_tor since each Tor instance provides SOCKS
+            haproxy_running=haproxy_running,
+            failed_instances=failed_instances,
+            last_check=get_current_timestamp()
+        )
+        
+        return status.to_dict()
 
     def update_subnet_stats(self):
-        """Update subnet statistics from current relay data"""
+        """Update subnet statistics"""
         try:
-            relay_data = self.fetch_tor_relays()
-            if relay_data and 'relays' in relay_data:                # Instead, just update general stats
-                self.stats.update({
-                    # Count of actually running subnets
-                    'active_subnets': len(self.active_subnets),
-                    'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                })
+            if not self.current_relays:
+                relay_data = self.fetch_tor_relays()
+                if relay_data:
+                    self.current_relays = self.extract_relay_ips(relay_data)
 
-                # Prepare and emit subnet data for the frontend
-                self.emit_subnet_data(relay_data['relays'])
+            subnet_counts = defaultdict(int)
+            for relay in self.current_relays:
+                ip_parts = relay['ip'].split('.')
+                if len(ip_parts) >= 2:
+                    subnet = f"{ip_parts[0]}.{ip_parts[1]}"
+                    subnet_counts[subnet] += 1
 
-                logger.info(
-                    f"Updated subnet stats: {len(self.active_subnets)} active subnets")
-                return True
-            else:
-                logger.error("No relay data received or invalid format")
-                return False
+            # Categorize subnets
+            active_count = 0
+            blocked_count = 0
+
+            for subnet, count in subnet_counts.items():
+                if subnet in self.active_subnets:
+                    active_count += 1
+                elif count < 5:  # Threshold for blocked
+                    blocked_count += 1
+
+            self.stats.update({
+                'active_subnets': active_count,
+                'blocked_subnets': blocked_count,
+                'last_update': datetime.now().isoformat()
+            })
+
         except Exception as e:
             logger.error(f"Error updating subnet stats: {e}")
-            return False
 
     def emit_subnet_data(self, relays):
-        """Prepare subnet data and emit it via WebSocket"""
+        """Emit subnet information to WebSocket clients"""
         try:
-            # Process relays by subnet
-            subnet_data = {}
+            subnet_counts = defaultdict(int)
+            subnet_details = defaultdict(list)
 
             for relay in relays:
-                if 'or_addresses' in relay:
-                    for addr in relay['or_addresses']:
-                        ip = addr.split(':')[0]
-                        if '.' in ip:  # IPv4
-                            subnet_prefix = '.'.join(ip.split('.')[:2])
-                            subnet = f"{subnet_prefix}.0.0/16"
+                ip_parts = relay['ip'].split('.')
+                if len(ip_parts) >= 2:
+                    subnet = f"{ip_parts[0]}.{ip_parts[1]}"
+                    subnet_counts[subnet] += 1
+                    subnet_details[subnet].append({
+                        'ip': relay['ip'],
+                        'country': relay['country'],
+                        'as_name': relay['as_name']
+                    })
 
-                            if subnet not in subnet_data:
-                                # Check if this subnet is active
-                                is_subnet_active = subnet in self.active_subnets
-                                subnet_data[subnet] = {
-                                    'subnet': subnet_prefix,
-                                    'total_relays': 0,
-                                    'active_relays': 0,
-                                    'countries': set(),
-                                    'status': 'running' if is_subnet_active else 'stopped',
-                                    'is_active': is_subnet_active,
-                                    'limit': 0,
-                                    'running_instances': 1 if is_subnet_active else 0,
-                                    'instances_count': 1  # Add field required by client
-                                }
+            # Sort by relay count
+            sorted_subnets = sorted(subnet_counts.items(),
+                                  key=lambda x: x[1], reverse=True)
 
-                            subnet_data[subnet]['total_relays'] += 1
-                            subnet_data[subnet]['active_relays'] += 1
+            subnet_data = []
+            for subnet, count in sorted_subnets[:100]:  # Top 100 subnets
+                status = 'active' if subnet in self.active_subnets else 'available'
+                limit = self.subnet_limits.get(subnet, 1)
+                
+                # Get instance count for this subnet
+                subnet_key = f"subnet_{subnet.replace('.', '_')}"
+                instance_count = 0
+                if subnet_key in self.subnet_tor_processes:
+                    instance_count = len(self.subnet_tor_processes[subnet_key])
 
-                            if 'country' in relay and relay['country']:
-                                subnet_data[subnet]['countries'].add(
-                                    relay['country'])
+                subnet_data.append({
+                    'subnet': subnet,
+                    'count': count,
+                    'status': status,
+                    'limit': limit,
+                    'instance_count': instance_count,
+                    'relays': subnet_details[subnet][:5]  # First 5 relays
+                })
 
-            # Convert to list and prepare for JSON serialization
-            subnet_list = []
-            for subnet, data in subnet_data.items():
-                subnet_entry = data.copy()
-                subnet_entry['countries'] = list(data['countries'])
-                subnet_list.append(subnet_entry)
-
-            # Sort by number of relays
-            subnet_list.sort(key=lambda x: x['total_relays'], reverse=True)
-
-            # Limit to top 300 subnets for better performance
-            subnet_list = subnet_list[:300]
-
-            # Add debug log
-            logger.info(
-                f"Preparing to emit subnet data: {len(subnet_list)} subnets")
-
-            # Emit via WebSocket
-            socketio.emit('subnet_update', {
-                'subnets': subnet_list,
+            socketio.emit('subnet_data', {
+                'subnets': subnet_data,
                 'stats': self.stats
             })
 
-            logger.info(f"Emitted subnet data: {len(subnet_list)} subnets")
-            return True
         except Exception as e:
-            logger.error(f"Error preparing subnet data: {e}", exc_info=True)
-            # Try to emit an error message so the client knows something went wrong
-            socketio.emit('error', {
-                'message': f"Error preparing subnet data: {str(e)}"
-            })
-            return False
+            logger.error(f"Error emitting subnet data: {e}")
 
     def start_monitoring(self):
-        """Start real-time monitoring thread"""
-        def monitor_loop():
-            last_subnet_update = 0
+        """Start monitoring Tor relays and subnet information"""
+        def monitor():
             while self.monitoring:
                 try:
-                    current_time = time.time()
+                    relay_data = self.fetch_tor_relays()
+                    if relay_data:
+                        relays = self.extract_relay_ips(relay_data)
+                        self.current_relays = relays
 
-                    # Update subnet statistics every 30 seconds
-                    if current_time - last_subnet_update >= 30:
+                        # Update subnet stats
                         self.update_subnet_stats()
-                        last_subnet_update = current_time
 
-                    # Get current status
-                    status = self.get_service_status()
+                        # Emit data to WebSocket clients
+                        self.emit_subnet_data(relays)
 
-                    # Emit status update via WebSocket
-                    socketio.emit('status_update', status)
+                        logger.info(f"Fetched {len(relays)} Tor relay IPs")
+                    else:
+                        logger.warning("Failed to fetch relay data")
 
-                    # Sleep for 5 seconds between updates
-                    time.sleep(5)
+                    # Sleep for 5 minutes
+                    for _ in range(300):
+                        if not self.monitoring:
+                            break
+                        time.sleep(1)
 
                 except Exception as e:
                     logger.error(f"Error in monitoring loop: {e}")
-                    time.sleep(10)
+                    time.sleep(60)  # Wait 1 minute on error
 
-        if not hasattr(self, '_monitor_thread') or not self._monitor_thread.is_alive():
-            self._monitor_thread = threading.Thread(
-                target=monitor_loop, daemon=True)
-            self._monitor_thread.start()
-            logger.info("Started real-time monitoring")
+        monitor_thread = threading.Thread(target=monitor)
+        monitor_thread.daemon = True
+        monitor_thread.start()
+        logger.info("Started monitoring thread")
 
     def stop_monitoring(self):
-        """Stop real-time monitoring"""
+        """Stop monitoring"""
         self.monitoring = False
-        logger.info("Stopped real-time monitoring")
 
     def start_subnet_tor(self, subnet, instances_count=1):
-        """Start Tor instances for a specific subnet using ConfigManager with subnet-based ExitNodes"""
+        """Start Tor instances for a specific subnet"""
         try:
-            # Validate subnet format
-            if not self.config_manager.validate_subnet(subnet):
-                logger.error(f"Invalid subnet format: {subnet}")
-                return False
-               # Ensure log directory exists
-            os.makedirs('/var/log/privoxy', exist_ok=True)
-            os.makedirs('/var/local/tor', exist_ok=True)
-
-            logger.info(
-                f"Starting {instances_count} Tor instances for subnet {subnet}")
-
-            subnet_key = f"{subnet}.0.0/16"
-            subnet_cidr = f"{subnet}.0.0/16"
+            subnet_key = f"subnet_{subnet.replace('.', '_')}"
 
             if subnet_key not in self.subnet_tor_processes:
                 self.subnet_tor_processes[subnet_key] = {}
-                self.subnet_privoxy_processes[subnet_key] = {}
-            
-            # Collect instance information for HAProxy config
-            subnet_instances = []
 
-            for i in range(1, instances_count + 1):
-                instance_id = f"{subnet}_{i}"
-                numeric_id = i  # Use numeric ID for port calculation
+            # Store the requested limit
+            self.subnet_limits[subnet] = instances_count
 
-                # Create instance directory
-                instance_dir = f'/var/local/tor/subnet_{subnet}_{i}'
-                os.makedirs(instance_dir, exist_ok=True)
-                os.chmod(instance_dir, 0o700)                # Get ports for this subnet instance (using numeric ID)
-                ports = self.config_manager.get_port_assignment(numeric_id)                # Create Tor configuration using ConfigManager
+            for i in range(instances_count):
+                instance_id = self.get_next_available_id()
+
+                # Create Tor config
                 tor_config_result = self.config_manager.create_tor_config(
-                    instance_id=numeric_id,
-                    subnet=subnet
-                )
+                    instance_id, subnet)
 
-                logger.info(
-                    f"Starting Tor instance {instance_id} for subnet {subnet} on ports {ports['socks_port']}/{ports['http_port']} with config {tor_config_result}")
+                # Start Tor process
+                tor_cmd = [
+                    'tor',
+                    '-f', tor_config_result['config_path']
+                ]
 
-                tor_cmd = ['tor', '-f', tor_config_result['config_path']]
+                logger.info(f"Starting Tor instance {instance_id} for subnet {subnet}")
+                logger.info(f"Command: {' '.join(tor_cmd)}")
+
                 process = subprocess.Popen(
                     tor_cmd,
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
+                    stderr=subprocess.PIPE,
+                    text=True
                 )
+
                 self.subnet_tor_processes[subnet_key][instance_id] = process
-                
-                privoxy_config_result = self.config_manager.create_privoxy_config(
-                    instance_id=numeric_id,
-                    tor_socks_port=ports['socks_port']
-                )
 
-                # Start Privoxy instance
-                privoxy_cmd = ['privoxy', '--no-daemon', privoxy_config_result['config_path']]
-                process = subprocess.Popen(
-                    privoxy_cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
-                )
-                self.subnet_privoxy_processes[subnet_key][instance_id] = process
+                # Add to HAProxy backend
+                socks_port = tor_config_result['socks_port']
+                self.config_manager.haproxy_manager.add_backend_instance(
+                    instance_id, socks_port)
 
-                logger.info(
-                    f"Started Tor+Privoxy for subnet {subnet}, instance {i} (targeting {subnet_cidr}) on ports {ports['socks_port']}/{ports['http_port']}")
+                logger.info(f"Started Tor instance {instance_id} for subnet {subnet} on SOCKS port {socks_port}")
 
-                # Add to subnet instances list
-                subnet_instances.append({
-                    'id': instance_id,
-                    'socks_port': ports['socks_port'],
-                    'ctrl_port': ports['ctrl_port'],
-                    'http_port': ports['http_port']
-                })
+            # Add subnet to active set
+            self.active_subnets.add(subnet)
 
-            # Update HAProxy configuration with subnet instances
+            # Update HAProxy configuration with all current instances
             self._update_haproxy_config()
+            self.update_running_instances_count()
 
-            # Add to active subnets
-            self.active_subnets.add(subnet_key)
-
+            logger.info(f"Started {instances_count} Tor instances for subnet {subnet}")
             return True
 
         except Exception as e:
-            logger.error(f"Error starting Tor for subnet {subnet}: {e}")
+            logger.error(f"Error starting Tor instances for subnet {subnet}: {e}")
             return False
 
     def stop_subnet_tor(self, subnet):
         """Stop Tor instances for a specific subnet"""
         try:
-            subnet_key = f"{subnet}.0.0/16"
+            subnet_key = f"subnet_{subnet.replace('.', '_')}"
 
             # Stop Tor processes
             if subnet_key in self.subnet_tor_processes:
                 for instance_id, process in self.subnet_tor_processes[subnet_key].items():
                     if process and process.poll() is None:
                         process.terminate()
-                        logger.info(f"Stopped Tor instance {instance_id}")
+                        logger.info(f"Stopped Tor instance {instance_id} for subnet {subnet}")
+
+                    # Remove from HAProxy backend
+                    self.config_manager.haproxy_manager.remove_backend_instance(instance_id)
+
                 del self.subnet_tor_processes[subnet_key]
 
-            # Stop Privoxy processes
-            if subnet_key in self.subnet_privoxy_processes:
-                for instance_id, process in self.subnet_privoxy_processes[subnet_key].items():
-                    if process and process.poll() is None:
-                        process.terminate()
-                        logger.info(f"Stopped Privoxy instance {instance_id}")
-                del self.subnet_privoxy_processes[subnet_key]
-
             # Remove from active subnets
-            self.active_subnets.discard(subnet_key)
+            self.active_subnets.discard(subnet)
+
+            # Remove subnet limit
+            if subnet in self.subnet_limits:
+                del self.subnet_limits[subnet]
 
             # Update HAProxy configuration
             self._update_haproxy_config()
+            self.update_running_instances_count()
 
+            logger.info(f"Stopped all instances for subnet {subnet}")
             return True
 
         except Exception as e:
-            logger.error(f"Error stopping Tor for subnet {subnet}: {e}")
+            logger.error(f"Error stopping subnet {subnet}: {e}")
             return False
 
     def _update_haproxy_config(self):
         """Update HAProxy configuration with current instances"""
         try:
-            # Collect all running instances
             all_instances = []
             
-            # Add main instances
-            for i in range(1, self.stats.get('tor_instances', 0) + 1):
-                if i in self.tor_processes and self.tor_processes[i].poll() is None:
-                    ports = self.config_manager.get_port_assignment(i)
-                    all_instances.append({
-                        'id': i,
-                        'socks_port': ports['socks_port'],
-                        'ctrl_port': ports['ctrl_port'],
-                        'http_port': ports['http_port']
-                    })
-
-            # Add subnet instances
+            # Collect all running instances
             for subnet_key, processes in self.subnet_tor_processes.items():
-                if processes:  # Only include subnets with running processes
-                    for instance_id in processes.keys():
-                        # Extract numeric ID from string instance_id (e.g., "185.220_1" -> 1)
-                        numeric_id = int(instance_id.split('_')[-1])
-                        ports = self.config_manager.get_port_assignment(numeric_id)
+                for instance_id, process in processes.items():
+                    if process and process.poll() is None:
+                        ports = self.config_manager.get_port_assignment(instance_id)
                         all_instances.append({
                             'id': instance_id,
-                            'socks_port': ports['socks_port'],
-                            'ctrl_port': ports['ctrl_port'],
-                            'http_port': ports['http_port']
+                            'socks_port': ports['socks_port']
                         })
-              # Update HAProxy config
-            self.config_manager.haproxy_manager.create_config(all_instances)
-            
-            # Use Runtime API for dynamic update (fallback to traditional reload if needed)
-            success = self.config_manager.haproxy_manager.reload_runtime_api(all_instances)
+
+            # Update HAProxy
+            success = self.config_manager.haproxy_manager.create_config(all_instances)
             if success:
-                logger.info(f"HAProxy configuration updated with {len(all_instances)} instances via Runtime API")
+                logger.info(f"Updated HAProxy with {len(all_instances)} instances")
             else:
                 logger.error("Failed to update HAProxy configuration")
-                
-            return success
-            
+
         except Exception as e:
-            logger.error(f"Error updating HAProxy configuration: {e}")
-            return False
+            logger.error(f"Error updating HAProxy config: {e}")
 
     def restart_subnet_tor(self, subnet, instances_count=1):
-        """Restart Tor instances for a specific subnet"""
+        """Restart Tor instances for a subnet"""
         try:
             self.stop_subnet_tor(subnet)
-            time.sleep(2)  # Wait for processes to terminate
+            time.sleep(2)  # Brief pause
             return self.start_subnet_tor(subnet, instances_count)
         except Exception as e:
-            logger.error(f"Error restarting Tor for subnet {subnet}: {e}")
+            logger.error(f"Error restarting subnet {subnet}: {e}")
             return False
 
-    def _reload_haproxy(self):
-        """Legacy method - now uses Runtime API for dynamic updates"""
-        # Get current instances for Runtime API update
-        all_instances = []
-        for subnet, processes in self.subnet_tor_processes.items():
-            for instance_id in processes.keys():
-                ports = self.config_manager.get_port_assignment(instance_id)
-                all_instances.append({
-                    'instance_id': instance_id,
-                    'subnet': subnet,
-                    'http_port': ports['http_port']
-                })
-        
-        return self.config_manager.haproxy_manager.reload_runtime_api(all_instances)
 
-# Global manager instance
+    def update_running_instances_count(self):
+        """Update the count of running instances"""
+        try:
+            running_count = 0
+            
+            # Count main instances
+            for process in self.tor_processes.values():
+                if process and process.poll() is None:
+                    running_count += 1
+            
+            # Count subnet instances
+            for processes in self.subnet_tor_processes.values():
+                for process in processes.values():
+                    if process and process.poll() is None:
+                        running_count += 1
+
+            self.stats['running_instances'] = running_count
+            self.stats['tor_instances'] = running_count  # Total Tor instances
+
+        except Exception as e:
+            logger.error(f"Error updating running instances count: {e}")
+
+    def get_next_available_id(self):
+        """Get the next available instance ID"""
+        current_id = self.next_instance_id
+        self.next_instance_id += 1
+        return current_id
+
+
+# Initialize the manager
 tor_manager = TorNetworkManager()
+
+# Start monitoring when the application starts
+tor_manager.start_monitoring()
 
 
 @app.route('/')
 def index():
-    """Main admin panel page"""
-    # Start monitoring when first user connects
-    tor_manager.start_monitoring()
-    # Initialize subnet stats
-    tor_manager.update_subnet_stats()
     return render_template('admin.html')
 
 
+@app.route('/api/subnets')
+def get_subnets():
+    try:
+        if not tor_manager.current_relays:
+            relay_data = tor_manager.fetch_tor_relays()
+            if relay_data:
+                tor_manager.current_relays = tor_manager.extract_relay_ips(relay_data)
+
+        subnet_counts = defaultdict(int)
+        for relay in tor_manager.current_relays:
+            ip_parts = relay['ip'].split('.')
+            if len(ip_parts) >= 2:
+                subnet = f"{ip_parts[0]}.{ip_parts[1]}"
+                subnet_counts[subnet] += 1
+
+        sorted_subnets = sorted(subnet_counts.items(), key=lambda x: x[1], reverse=True)
+
+        # Create subnet data using new model
+        subnet_data_list = []
+        for subnet, count in sorted_subnets[:100]:
+            status = 'active' if subnet in tor_manager.active_subnets else 'available'
+            limit = tor_manager.subnet_limits.get(subnet, 1)
+            
+            # Count running instances for this subnet
+            running_instances = 0
+            if subnet in tor_manager.subnet_tor_processes:
+                for process in tor_manager.subnet_tor_processes[subnet].values():
+                    if process and process.poll() is None:
+                        running_instances += 1
+
+            subnet_data = SubnetData(
+                subnet=subnet,
+                count=count,
+                status=status,
+                limit=limit,
+                running_instances=running_instances,
+                last_updated=get_current_timestamp()
+            )
+            subnet_data_list.append(subnet_data.to_dict())
+
+        # Create stats using new model
+        stats = Stats(
+            active_subnets=len(tor_manager.active_subnets),
+            blocked_subnets=0,  # TODO: implement blocked subnets tracking
+            total_subnets=len(subnet_counts),
+            tor_instances=len(tor_manager.tor_processes),
+            running_instances=tor_manager.stats.get('running_instances', 0),
+            last_update=get_current_timestamp()
+        )
+
+        return jsonify({
+            'success': True,
+            'subnets': subnet_data_list,
+            'stats': stats.to_dict()
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting subnets: {e}")
+        return jsonify(create_error_response("Failed to fetch subnets", str(e))), 500
+
+
+
+
+
 @app.route('/api/status')
-def api_status():
-    """Get current status of all services"""
-    service_status = tor_manager.get_service_status()
-
-    return jsonify({
-        'services': service_status,
-        'stats': tor_manager.stats
-    })
-
-
-@app.route('/api/start', methods=['POST'])
-def api_start():
-    """Start Tor and Privoxy services"""
+def get_status():
     try:
-        success = tor_manager.start_services()
-        if success:
-            return jsonify({'success': True, 'message': 'Services started successfully'})
-        else:
-            return jsonify({'success': False, 'message': 'Failed to start services'})
-    except Exception as e:
-        logger.error(f"Error in start API: {e}")
-        return jsonify({'success': False, 'message': str(e)})
-
-
-@app.route('/api/stop', methods=['POST'])
-def api_stop():
-    """Stop Tor and Privoxy services"""
-    try:
-        success = tor_manager.stop_services()
-        if success:
-            return jsonify({'success': True, 'message': 'Services stopped successfully'})
-        else:
-            return jsonify({'success': False, 'message': 'Failed to stop services'})
-    except Exception as e:
-        logger.error(f"Error in stop API: {e}")
-        return jsonify({'success': False, 'message': str(e)})
-
-
-@app.route('/api/services/start', methods=['POST'])
-def api_services_start():
-    """Start all services"""
-    try:
-        success = tor_manager.start_services()
         status = tor_manager.get_service_status()
-        return jsonify({'success': success, 'status': status})
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Error getting status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+
+
+
+# Service endpoints for frontend compatibility
+@app.route('/api/services/start', methods=['POST'])
+def start_services_alt():
+    """Alternative endpoint for starting services"""
+    try:
+        success = tor_manager.start_services()
+        if success:
+            return jsonify(create_success_response('Services initialized successfully'))
+        else:
+            return jsonify(create_error_response('Failed to initialize services'))
     except Exception as e:
         logger.error(f"Error starting services: {e}")
-        return jsonify({'success': False, 'error': str(e)})
-
+        return jsonify(create_error_response("Error starting services", str(e))), 500
 
 @app.route('/api/services/stop', methods=['POST'])
-def api_services_stop():
-    """Stop all services"""
+def stop_services_alt():
+    """Alternative endpoint for stopping services"""
     try:
         success = tor_manager.stop_services()
-        status = tor_manager.get_service_status()
-        return jsonify({'success': success, 'status': status})
+        message = 'Services stopped' if success else 'Failed to stop services'
+        if success:
+            return jsonify(create_success_response(message))
+        else:
+            return jsonify(create_error_response(message))
     except Exception as e:
         logger.error(f"Error stopping services: {e}")
-        return jsonify({'success': False, 'error': str(e)})
-
+        return jsonify(create_error_response("Error stopping services", str(e))), 500
 
 @app.route('/api/services/restart', methods=['POST'])
-def api_services_restart():
+def restart_services():
     """Restart all services"""
     try:
         tor_manager.stop_services()
-        time.sleep(2)  # Wait a bit for processes to terminate
+        time.sleep(2)  # Give services time to stop
         success = tor_manager.start_services()
-        status = tor_manager.get_service_status()
-        return jsonify({'success': success, 'status': status})
+        if success:
+            return jsonify(create_success_response('Services restarted successfully'))
+        else:
+            return jsonify(create_error_response('Failed to restart services'))
     except Exception as e:
         logger.error(f"Error restarting services: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify(create_error_response("Error restarting services", str(e))), 500
 
-
-@app.route('/api/services/status')
-def api_services_status():
-    """Get current service status"""
+@app.route('/api/test-proxy')
+def test_proxy():
+    """Test proxy functionality"""
     try:
-        status = tor_manager.get_service_status()
-        return jsonify(status)
+        # Test proxy by making a request through it
+        proxy_url = "http://127.0.0.1:8888"  # HAProxy load balancer
+        test_url = "http://httpbin.org/ip"
+        
+        start_time = time.time()
+        
+        try:
+            proxies = {
+                'http': proxy_url,
+                'https': proxy_url
+            }
+            response = requests.get(test_url, proxies=proxies, timeout=10)
+            response_time = time.time() - start_time
+            
+            if response.status_code == 200:
+                data = response.json()
+                exit_ip = data.get('origin', 'Unknown')
+                
+                result = ProxyTestResult(
+                    success=True,
+                    ip=exit_ip,
+                    response_time=response_time,
+                    timestamp=get_current_timestamp()
+                )
+                return jsonify(result.to_dict())
+            else:
+                result = ProxyTestResult(
+                    success=False,
+                    error=f"HTTP {response.status_code}",
+                    timestamp=get_current_timestamp()
+                )
+                return jsonify(result.to_dict())
+                
+        except requests.RequestException as req_err:
+            result = ProxyTestResult(
+                success=False,
+                error=str(req_err),
+                timestamp=get_current_timestamp()
+            )
+            return jsonify(result.to_dict())
+            
     except Exception as e:
-        logger.error(f"Error getting service status: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+        logger.error(f"Error testing proxy: {e}")
+        result = ProxyTestResult(
+            success=False,
+            error=str(e),
+            timestamp=get_current_timestamp()
+        )
+        return jsonify(result.to_dict())
 
-
-@app.route('/api/subnets')
-def api_subnets():
-    """Get subnet data"""
+# Alternative subnet endpoints for frontend compatibility
+@app.route('/api/subnet/<subnet>/restart', methods=['POST'])
+def restart_subnet_alt(subnet):
+    """Alternative endpoint for restarting subnet"""
     try:
-        # Trigger an update of subnet stats
-        tor_manager.update_subnet_stats()
-
-        # Collect subnet data from the tor_manager
-        relay_data = tor_manager.fetch_tor_relays()
-        if not relay_data or 'relays' not in relay_data:
-            return jsonify({'success': False, 'error': 'Failed to fetch relay data'})
-
-        # Process relays by subnet (similar to emit_subnet_data function)
-        subnet_data = {}
-        for relay in relay_data['relays']:
-            if 'or_addresses' in relay:
-                for addr in relay['or_addresses']:
-                    ip = addr.split(':')[0]
-                    if '.' in ip:  # IPv4
-                        subnet_prefix = '.'.join(ip.split('.')[:2])
-                        subnet = f"{subnet_prefix}.0.0/16"
-
-                        if subnet not in subnet_data:
-                            # Check if this subnet is active
-                            is_subnet_active = subnet in tor_manager.active_subnets
-                            subnet_data[subnet] = {
-                                'subnet': subnet_prefix,
-                                'total_relays': 0,
-                                'active_relays': 0,
-                                'countries': set(),
-                                'status': 'running' if is_subnet_active else 'stopped',
-                                'is_active': is_subnet_active,
-                                'limit': 0,
-                                'running_instances': 1 if is_subnet_active else 0,
-                                'instances_count': 1
-                            }
-
-                        subnet_data[subnet]['total_relays'] += 1
-                        subnet_data[subnet]['active_relays'] += 1
-
-                        if 'country' in relay and relay['country']:
-                            subnet_data[subnet]['countries'].add(
-                                relay['country'])
-
-        # Convert to list and prepare for JSON serialization
-        subnet_list = []
-        for subnet, data in subnet_data.items():
-            subnet_entry = data.copy()
-            subnet_entry['countries'] = list(data['countries'])
-            subnet_list.append(subnet_entry)
-
-        # Sort by number of relays
-        subnet_list.sort(key=lambda x: x['total_relays'], reverse=True)
-
-        # Limit to top 300 subnets for better performance
-        subnet_list = subnet_list[:300]
-
-        return jsonify({
-            'success': True,
-            'subnets': subnet_list,
-            'stats': tor_manager.stats
-        })
-    except Exception as e:
-        logger.error(f"Error getting subnet data: {e}", exc_info=True)
-        return jsonify({'success': False, 'error': str(e)})
-
-
-@app.route('/api/subnet/<subnet>/toggle', methods=['POST'])
-def api_toggle_subnet(subnet):
-    """Toggle subnet active status"""
-    try:
-        logger.info(f"Toggle request for subnet: {subnet}")
-        # Find subnet in active_subnets
-        subnet_key = f"{subnet}.0.0/16"
-        is_active = subnet_key in tor_manager.active_subnets
-
-        logger.info(
-            f"Subnet {subnet} current status: {'active' if is_active else 'inactive'}")
-        logger.info(f"Active subnets: {list(tor_manager.active_subnets)}")
-
-        # Toggle status
-        if is_active:
-            logger.info(f"Stopping subnet {subnet}...")
-            # Stop the subnet
-            success = tor_manager.stop_subnet_tor(subnet)
-            if not success:
-                logger.error(f"Failed to stop subnet {subnet}")
-                return jsonify({'success': False, 'error': 'Failed to stop subnet'})
+        data = request.get_json() or {}
+        instances_count = data.get('instances', 1)
+        
+        success = tor_manager.restart_subnet_tor(subnet, instances_count)
+        if success:
+            return jsonify(create_success_response(f'Restarted {instances_count} instances for subnet {subnet}'))
         else:
-            logger.info(f"Starting subnet {subnet}...")
-            # Start the subnet
-            success = tor_manager.start_subnet_tor(subnet, instances_count=1)
-            if not success:
-                logger.error(f"Failed to start subnet {subnet}")
-                return jsonify({'success': False, 'error': 'Failed to start subnet'})
-
-        # Get new status
-        is_active = subnet_key in tor_manager.active_subnets
-        logger.info(
-            f"Subnet {subnet} new status: {'active' if is_active else 'inactive'}")
-
-        # Update statistics
-        tor_manager.stats['active_subnets'] = len(tor_manager.active_subnets)
-
-        # Emit subnet status update
-        socketio.emit('subnet_status_update', {
-            'subnet': subnet,
-            'is_active': is_active,
-            'status': 'running' if is_active else 'stopped'
-        })
-
-        return jsonify({
-            'success': True,
-            'subnet': subnet,
-            'active': is_active,
-            'message': f"Subnet {subnet} {'started' if is_active else 'stopped'} successfully"
-        })
+            return jsonify(create_error_response(f'Failed to restart instances for subnet {subnet}'))
+            
     except Exception as e:
-        logger.error(f"Error toggling subnet {subnet}: {e}", exc_info=True)
-        return jsonify({'success': False, 'error': str(e)})
+        logger.error(f"Error restarting subnet: {e}")
+        return jsonify(create_error_response("Error restarting subnet", str(e))), 500
 
+@app.route('/api/subnet/<subnet>/start', methods=['POST'])
+def start_subnet_alt(subnet):
+    """Alternative endpoint for starting subnet"""
+    try:
+        data = request.get_json() or {}
+        instances_count = data.get('instances', 1)
+        
+        tor_manager.stop_services()
+        success = tor_manager.start_subnet_tor(subnet, instances_count)
+        if success:
+            return jsonify(create_success_response(f'Started {instances_count} instances for subnet {subnet}'))
+        else:
+            return jsonify(create_error_response(f'Failed to start instances for subnet {subnet}'))
+            
+    except Exception as e:
+        logger.error(f"Error starting subnet: {e}")
+        return jsonify(create_error_response("Error starting subnet", str(e))), 500
 
-@app.route('/api/subnet/<subnet>/limit', methods=['POST'])
-def api_set_subnet_limit(subnet):
-    """Set instance limit for a subnet"""
+@app.route('/api/subnet/<subnet>/stop', methods=['POST'])
+def stop_subnet_alt(subnet):
+    """Alternative endpoint for stopping subnet"""
+    try:
+        success = tor_manager.stop_subnet_tor(subnet)
+        if success:
+            return jsonify(create_success_response(f'Stopped instances for subnet {subnet}'))
+        else:
+            return jsonify(create_error_response(f'Failed to stop instances for subnet {subnet}'))
+            
+    except Exception as e:
+        logger.error(f"Error stopping subnet: {e}")
+        return jsonify(create_error_response("Error stopping subnet", str(e))), 500
+
+@app.route('/api/subnet/<subnet>/limit', methods=['PUT'])
+def set_subnet_limit(subnet):
+    """Set the maximum number of addresses/instances for a subnet"""
     try:
         data = request.get_json()
-        limit = data.get('limit', 1)
-
-        subnet_key = f"{subnet}.0.0/16"
-        tor_manager.subnet_limits[subnet_key] = limit
-
-        return jsonify({
-            'success': True,
-            'subnet': subnet,
-            'limit': limit,
-            'message': f'Limit for subnet {subnet} set to {limit}'
-        })
-    except Exception as e:
-        logger.error(f"Error setting limit for subnet {subnet}: {e}")
-        return jsonify({'success': False, 'error': str(e)})
-
-
-@app.route('/api/haproxy/status')
-def api_haproxy_status():
-    """Get HAProxy status"""
-    try:
-        status = {
-            'running': tor_manager.config_manager.haproxy_manager.is_running(),
-            'config_valid': True,  # We'll assume it's valid if we got this far
-            'config_error': None  # Add this as default
-        }
-          # Validate config
-        try:
-            config_path = tor_manager.config_manager.haproxy_manager.config_path
-            validate_cmd = ['haproxy', '-c', '-f', config_path]
-            result = subprocess.run(validate_cmd, capture_output=True, text=True)
-            status['config_valid'] = result.returncode == 0
-            if not status['config_valid']:
-                status['config_error'] = result.stderr
-        except Exception as e:
-            status['config_valid'] = False
-            status['config_error'] = str(e)
+        if not data or 'limit' not in data:
+            return jsonify(create_error_response('Limit value is required')), 400
         
-        return jsonify(status)
-    except Exception as e:
-        logger.error(f"Error getting HAProxy status: {e}")
-        return jsonify({'success': False, 'error': str(e)})
-
-@app.route('/api/haproxy/reload', methods=['POST'])
-def api_haproxy_reload():
-    """Reload HAProxy configuration using Runtime API"""
-    try:
-        # Get current instances for Runtime API update
-        all_instances = []
-        for subnet, processes in tor_manager.subnet_tor_processes.items():
-            for instance_id in processes.keys():
-                ports = tor_manager.config_manager.get_port_assignment(instance_id)
-                all_instances.append({
-                    'instance_id': instance_id,
-                    'subnet': subnet,
-                    'http_port': ports['http_port']
-                })
+        limit = data['limit']
+        if not isinstance(limit, int) or limit < 1:
+            return jsonify(create_error_response('Limit must be a positive integer')), 400
         
-        success = tor_manager.config_manager.haproxy_manager.reload_runtime_api(all_instances)
+        # Store the limit for this subnet
+        tor_manager.subnet_limits[subnet] = limit
+        
+        return jsonify(create_success_response(f'Set limit for subnet {subnet} to {limit} instances'))
+        
+    except Exception as e:
+        logger.error(f"Error setting subnet limit: {e}")
+        return jsonify(create_error_response("Error setting subnet limit", str(e))), 500
+
+@app.route('/api/subnet/<subnet>/instances', methods=['PUT'])
+def set_subnet_instances(subnet):
+    """Set the number of running instances for a subnet"""
+    try:
+        data = request.get_json()
+        if not data or 'instances' not in data:
+            return jsonify(create_error_response('Instances value is required')), 400
+        
+        instances = data['instances']
+        if not isinstance(instances, int) or instances < 0:
+            return jsonify(create_error_response('Instances must be a non-negative integer')), 400
+        
+        # Check if we have a limit set for this subnet
+        limit = tor_manager.subnet_limits.get(subnet, 10)  # Default limit of 10
+        if instances > limit:
+            return jsonify(create_error_response(f'Instances count ({instances}) exceeds limit ({limit})')), 400
+        
+        if instances == 0:
+            # Stop all instances for this subnet
+            success = tor_manager.stop_subnet_tor(subnet)
+            message = f'Stopped all instances for subnet {subnet}'
+        else:
+            # Start or adjust instances for this subnet
+            tor_manager.stop_subnet_tor(subnet)  # Stop existing first
+            success = tor_manager.start_subnet_tor(subnet, instances)
+            message = f'Set {instances} instances for subnet {subnet}'
+        
         if success:
-            return jsonify({'success': True, 'message': 'HAProxy reloaded successfully via Runtime API'})
+            return jsonify(create_success_response(message))
         else:
-            return jsonify({'success': False, 'message': 'Failed to reload HAProxy'})
+            return jsonify(create_error_response(f'Failed to set instances for subnet {subnet}'))
+        
     except Exception as e:
-        logger.error(f"Error reloading HAProxy: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+        logger.error(f"Error setting subnet instances: {e}")
+        return jsonify(create_error_response("Error setting subnet instances", str(e))), 500
 
 
+def signal_handler(signum, frame):
+    logger.info("Received shutdown signal, stopping services...")
+    tor_manager.stop_monitoring()
+    tor_manager.stop_services()
+    exit(0)
 
-@app.route('/api/haproxy/stats', methods=['GET'])
-def api_haproxy_stats():
-    """Get HAProxy statistics via Runtime API"""
-    try:
-        stats = tor_manager.config_manager.haproxy_manager.get_stats()
-        if stats:
-            return jsonify({'success': True, 'stats': stats})
-        else:
-            return jsonify({'success': False, 'message': 'Failed to get HAProxy stats'})
-    except Exception as e:
-        logger.error(f"Error getting HAProxy stats: {e}")
-        return jsonify({'success': False, 'error': str(e)})
 
-@app.route('/api/haproxy/backend/servers', methods=['GET'])
-def api_haproxy_backend_servers():
-    """Get backend servers via Runtime API"""
-    try:
-        backend = request.args.get('backend', 'privoxy')
-        servers = tor_manager.config_manager.get_backend_servers(backend)
-        return jsonify({'success': True, 'backend': backend, 'servers': servers})
-    except Exception as e:
-        logger.error(f"Error getting backend servers: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 if __name__ == '__main__':
-    # Start the monitoring
-    tor_manager.start_monitoring()
-
-    logger.info("Starting Tor Network Admin Panel on http://0.0.0.0:5000")
-
-    # Run the Flask app with SocketIO
-    socketio.run(app,
-                 host='0.0.0.0',
-                 port=5000,
-                 debug=False,  # Set to False for production
-                 allow_unsafe_werkzeug=True)
+    logger.info("Starting Tor SOCKS5 Proxy Admin Panel...")
+    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)

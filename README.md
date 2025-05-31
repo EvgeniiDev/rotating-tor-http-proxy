@@ -6,12 +6,12 @@
 
 # rotating-tor-http-proxy
 
-This Docker image provides one HTTP proxy endpoint with many IP addresses for use scenarios like web crawling.
+This Docker image provides one SOCKS5 proxy endpoint with many IP addresses for use scenarios like web crawling.
 
 ![Screenshot](https://raw.githubusercontent.com/zhaow-de/rotating-tor-http-proxy/main/images/screenshot_1.gif)
 
-Behind the scene, it has a HAProxy sitting in front of multiple pairs of Privoxy-Tor. The HAProxy dispatches the incoming
-requests to the Privoxy instances with a round-robin strategy. 
+Behind the scene, it has a HAProxy sitting in front of multiple Tor SOCKS5 proxies. The HAProxy dispatches the incoming
+requests to the Tor instances with a round-robin strategy.
 
 ## Usage
 
@@ -41,8 +41,7 @@ HAProxy official blog explains in detail how to understand this report.
 
 #### `TOR_INSTANCES`
 
-Environment variable `TOR_INSTANCES` can be used to config the number of concurrent Tor clients (as well as the associated Privoxy 
-instances). The default is 10, and the valid value is purposely limited to the range between 1 and 40. 
+Environment variable `TOR_INSTANCES` can be used to config the number of concurrent Tor clients. The default is 10, and the valid value is purposely limited to the range between 1 and 40.
 
 #### `TOR_REBUILD_INTERVAL`
 Each Tor client attempts to build a new circuit (results in a new outbound IP address) every 30 seconds. Every 30 minutes, this image
@@ -115,8 +114,8 @@ while :; do curl -sx localhost:3128 ifconfig.io; echo ""; sleep 2; done
 At GitHub, there are many repos build Docker images to provide HTTP proxy connects to the Tor network.
 The project is reinventing the wheels based on many of them.
 Remarkably:
-- [y4ns0l0/docker-multi-tor](https://github.com/y4ns0l0/docker-multi-tor) creates a setup with multiple pairs of Privoxy-Tor. Having no
-  HAProxy-like dispatcher, each Privoxy expose itself to the host as a different TCP port.
+- [y4ns0l0/docker-multi-tor](https://github.com/y4ns0l0/docker-multi-tor) creates a setup with multiple Tor instances. Having no
+  HAProxy-like dispatcher, each Tor instance exposes itself to the host as a different TCP port.
 - [mattes/rotating-proxy](https://github.com/mattes/rotating-proxy) does exactly the same job as this project. However,
     1. it utilizes [Polipo](https://www.irif.fr/~jch/software/polipo/) as the HTTP-SOCKS proxy adapter. Polipo ceased to be maintained on
        6 November 2016
@@ -131,7 +130,6 @@ Remarkably:
 - bash-5.2.37
 - curl-8.12.1
 - haproxy-3.0.10
-- privoxy-3.0.34
 - sed-4.9
 - tor-0.4.8.16
 <!--- BOM-ends. Document ends here too --->

@@ -4,12 +4,11 @@ This directory contains all the source files and configurations for the Tor HTTP
 
 ## Python Scripts
 - `admin_panel.py` - Flask web interface for managing the proxy
-- `config_manager.py` - Configuration management for Tor, Privoxy, and HAProxy
+- `config_manager.py` - Configuration management for Tor, and HAProxy
 - `haproxy_manager.py` - HAProxy specific management functions
 
 ## Configuration Files
 - `tor.cfg` - Tor configuration template
-- `privoxy.cfg` - Privoxy configuration template
 - `haproxy.cfg` - HAProxy configuration template
 
 ## Scripts
