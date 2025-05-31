@@ -86,13 +86,9 @@ class TorNetworkManager:
         try:
             logger.info("Initializing services infrastructure...")
             
-            # Directories and permissions are already set up by Dockerfile
-            # Just verify that HAProxy is accessible for runtime management
+            # Directories and permissions are already set up by Dockerfile            # Just verify that HAProxy is accessible for runtime management
             if not self.config_manager.haproxy_manager.is_running():
                 logger.warning("HAProxy is not running. It should be started by the shell script.")
-            
-            # Initialize HAProxy for runtime management (HAProxy is started by shell script)
-            self.config_manager.haproxy_manager.initialize_for_runtime_management()
 
             self.services_started = True
             self.stats['tor_instances'] = 0  # No instances started yet
@@ -383,28 +379,29 @@ class TorNetworkManager:
                 os.makedirs(instance_dir, exist_ok=True)
                 os.chmod(instance_dir, 0o700)                # Get ports for this subnet instance (using numeric ID)
                 ports = self.config_manager.get_port_assignment(numeric_id)                # Create Tor configuration using ConfigManager
-                tor_config_path = self.config_manager.create_tor_config(
+                tor_config_result = self.config_manager.create_tor_config(
                     instance_id=numeric_id,
                     subnet=subnet
                 )
 
                 logger.info(
-                    f"Starting Tor instance {instance_id} for subnet {subnet} on ports {ports['socks_port']}/{ports['http_port']} with config {tor_config_path}")
+                    f"Starting Tor instance {instance_id} for subnet {subnet} on ports {ports['socks_port']}/{ports['http_port']} with config {tor_config_result}")
 
-                tor_cmd = ['tor', '-f', tor_config_path]
+                tor_cmd = ['tor', '-f', tor_config_result['config_path']]
                 process = subprocess.Popen(
                     tor_cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE
                 )
-                self.subnet_tor_processes[subnet_key][instance_id] = process                
-                privoxy_config_path = self.config_manager.create_privoxy_config(
+                self.subnet_tor_processes[subnet_key][instance_id] = process
+                
+                privoxy_config_result = self.config_manager.create_privoxy_config(
                     instance_id=numeric_id,
                     tor_socks_port=ports['socks_port']
                 )
 
                 # Start Privoxy instance
-                privoxy_cmd = ['privoxy', '--no-daemon', privoxy_config_path]
+                privoxy_cmd = ['privoxy', '--no-daemon', privoxy_config_result['config_path']]
                 process = subprocess.Popen(
                     privoxy_cmd,
                     stdout=subprocess.PIPE,

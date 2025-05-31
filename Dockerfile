@@ -11,13 +11,12 @@ ENV \
 EXPOSE 3128/tcp 4444/tcp 5000/tcp
 
 # Install system packages in separate layer for better caching
-RUN apk --no-cache --no-progress --quiet add tor bash privoxy haproxy curl sed
+RUN apk --no-cache --no-progress --quiet add tor bash privoxy haproxy curl sed socat
 
-COPY requirements.txt ./
+COPY src/requirements.txt ./
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-COPY tor.cfg privoxy.cfg haproxy.cfg start_with_admin.sh admin_panel.py config_manager.py haproxy_manager.py ./
-COPY templates/ templates/
+COPY src/ ./
 
 RUN mv /tor.cfg /etc/tor/torrc.default && \
     mv /privoxy.cfg /etc/privoxy/config.templ && \
