@@ -75,79 +75,7 @@ class TorNetworkManager:
                         })
         return relays
 
-    def analyze_subnet_distribution(self, relays):
-        """Analyze how relays are distributed across subnets"""
-        subnet_counts = defaultdict(list)
 
-        for relay in relays:
-            ip = relay['ip']
-            # Use /16 subnet for analysis
-            subnet = '.'.join(ip.split('.')[:2]) + '.0.0/16'
-            subnet_counts[subnet].append(relay)
-
-        # Sort by number of relays per subnet
-        sorted_subnets = sorted(subnet_counts.items(),
-                                key=lambda x: len(x[1]),
-                                reverse=True)
-
-        return dict(sorted_subnets)
-
-    def check_subnet_diversity(self):
-        """Check current subnet diversity and suggest optimizations"""
-        relay_data = self.fetch_tor_relays()
-        if not relay_data:
-            return None
-            
-        relays = self.extract_relay_ips(relay_data)
-        subnet_distribution = self.analyze_subnet_distribution(relays)
-
-        self.stats['active_subnets'] = len(subnet_distribution)
-        self.stats['last_update'] = datetime.now()
-
-        # Find subnets with too many relays (potential blocking risk)
-        risky_subnets = {k: v for k,
-                         v in subnet_distribution.items() if len(v) > 10}
-        self.stats['blocked_subnets'] = len(risky_subnets)
-
-        return {
-            'total_subnets': len(subnet_distribution),
-            'risky_subnets': len(risky_subnets),
-            'top_subnets': dict(list(subnet_distribution.items())[:10]),
-            'recommendations': self.generate_recommendations(subnet_distribution)
-        }
-
-    def generate_recommendations(self, subnet_distribution):
-        """Generate recommendations for better diversity"""
-        recommendations = []
-
-        # Check for over-concentrated subnets
-        for subnet, relays in subnet_distribution.items():
-            if len(relays) > 15:
-                recommendations.append(
-                    f"Subnet {subnet} has {len(relays)} relays - consider blocking")
-            elif len(relays) > 10:
-                recommendations.append(
-                    f"Subnet {subnet} has {len(relays)} relays - monitor closely")
-
-        if not recommendations:
-            recommendations.append("Subnet distribution looks good!")
-
-        return recommendations
-
-    def update_monitoring_config(self, config):
-        """Update monitoring configuration"""
-        try:
-            # Save configuration
-            with open('/tmp/tor_monitoring_config.json', 'w') as f:
-                json.dump(config, f)            # Update internal state
-            self.subnet_limits = config.get('subnet_limits', {})
-
-            logger.info("Monitoring configuration updated")
-            return True
-
-        except Exception as e:
-            logger.error(f"Error updating monitoring config: {e}")
-            return False
 
     def start_services(self):
         """Initialize infrastructure without starting Tor instances. Tor instances will be started on user request."""
@@ -157,35 +85,20 @@ class TorNetworkManager:
 
         try:
             logger.info("Initializing services infrastructure...")
-
-            # Create directories
-            os.makedirs('/var/lib/tor', exist_ok=True)
-            os.makedirs('/var/log/tor', exist_ok=True)
-            os.makedirs('/var/log/privoxy', exist_ok=True)
-            os.makedirs('/var/run/tor', exist_ok=True)
-            os.makedirs('/var/local/tor', exist_ok=True)
-            os.makedirs('/var/local/privoxy', exist_ok=True)
             
-            # Set proper ownership for directories
-            try:
-                subprocess.run(['chown', '-R', 'proxy:proxy', '/var/lib/tor'], check=True)
-                subprocess.run(['chown', '-R', 'proxy:proxy', '/var/log/tor'], check=True)
-                subprocess.run(['chown', '-R', 'proxy:proxy', '/var/run/tor'], check=True)
-                subprocess.run(['chown', '-R', 'proxy:proxy', '/var/log/privoxy'], check=True)
-                subprocess.run(['chown', '-R', 'proxy:proxy', '/var/local/tor'], check=True)
-                subprocess.run(['chown', '-R', 'proxy:proxy', '/var/local/privoxy'], check=True)
-            except subprocess.CalledProcessError:
-                logger.warning("Could not set proper ownership for some directories")
-
-            # Initialize HAProxy with empty configuration (no backends initially)
-            self.config_manager.create_haproxy_config([])
-            self._reload_haproxy()
+            # Directories and permissions are already set up by Dockerfile
+            # Just verify that HAProxy is accessible for runtime management
+            if not self.config_manager.haproxy_manager.is_running():
+                logger.warning("HAProxy is not running. It should be started by the shell script.")
+            
+            # Initialize HAProxy for runtime management (HAProxy is started by shell script)
+            self.config_manager.haproxy_manager.initialize_for_runtime_management()
 
             self.services_started = True
             self.stats['tor_instances'] = 0  # No instances started yet
             self.stats['running_instances'] = 0
 
-            logger.info("Services infrastructure initialized successfully. Tor instances can now be started on demand.")
+            logger.info("Services infrastructure initialized successfully. HAProxy is managed by shell script. Tor instances can now be started on demand.")
             return True
 
         except Exception as e:
@@ -207,14 +120,29 @@ class TorNetworkManager:
                     process.terminate()
                     logger.info(f"Stopped Privoxy instance {i}")
 
+            # Stop subnet processes
+            for subnet_key, processes in self.subnet_tor_processes.items():
+                for instance_id, process in processes.items():
+                    if process and process.poll() is None:
+                        process.terminate()
+                        logger.info(f"Stopped subnet Tor instance {instance_id}")
+
+            for subnet_key, processes in self.subnet_privoxy_processes.items():
+                for instance_id, process in processes.items():
+                    if process and process.poll() is None:
+                        process.terminate()
+                        logger.info(f"Stopped subnet Privoxy instance {instance_id}")
+
             self.tor_processes.clear()
             self.privoxy_processes.clear()
+            self.subnet_tor_processes.clear()
+            self.subnet_privoxy_processes.clear()
+            self.active_subnets.clear()
+            
+            # HAProxy stop is handled by shell script
+            
             self.services_started = False
             self.stats['running_instances'] = 0
-
-            # Update HAProxy config to remove backends using ConfigManager
-            self.config_manager.create_haproxy_config([])
-            self._reload_haproxy()
 
             logger.info("All services stopped")
             return True
@@ -264,8 +192,11 @@ class TorNetworkManager:
         total_running_tor = running_tor + subnet_running_tor
         total_running_privoxy = running_privoxy + subnet_running_privoxy
 
+        # Check HAProxy status
+        haproxy_running = self.config_manager.haproxy_manager.is_running()
+
         # Determine overall status
-        if self.services_started and total_running_tor > 0 and total_running_privoxy > 0:
+        if self.services_started and total_running_tor > 0 and total_running_privoxy > 0 and haproxy_running:
             if total_running_tor == self.stats.get('tor_instances', 0) and total_running_privoxy == self.stats.get('tor_instances', 0):
                 status = "running"
             else:
@@ -280,8 +211,10 @@ class TorNetworkManager:
             'services_started': self.services_started,
             'running_tor': total_running_tor,
             'running_privoxy': total_running_privoxy,
+            'haproxy_running': haproxy_running,
             'total_instances': self.stats.get('tor_instances', 0),
-            'failed_instances': failed_instances,            'active_subnets': len(self.active_subnets),
+            'failed_instances': failed_instances,
+            'active_subnets': len(self.active_subnets),
             'subnet_list': list(self.active_subnets),
             'stats': self.stats.copy(),
             'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -418,14 +351,13 @@ class TorNetworkManager:
         logger.info("Stopped real-time monitoring")
 
     def start_subnet_tor(self, subnet, instances_count=1):
-        logger.info(f"Starting Tor instances for subnet {subnet} with {instances_count} instances")
         """Start Tor instances for a specific subnet using ConfigManager with subnet-based ExitNodes"""
         try:
             # Validate subnet format
             if not self.config_manager.validate_subnet(subnet):
                 logger.error(f"Invalid subnet format: {subnet}")
                 return False
-              # Ensure log directory exists
+               # Ensure log directory exists
             os.makedirs('/var/log/privoxy', exist_ok=True)
             os.makedirs('/var/local/tor', exist_ok=True)
 
@@ -437,7 +369,9 @@ class TorNetworkManager:
 
             if subnet_key not in self.subnet_tor_processes:
                 self.subnet_tor_processes[subnet_key] = {}
-                self.subnet_privoxy_processes[subnet_key] = {}            # Collect instance information for HAProxy config
+                self.subnet_privoxy_processes[subnet_key] = {}
+            
+            # Collect instance information for HAProxy config
             subnet_instances = []
 
             for i in range(1, instances_count + 1):
@@ -447,15 +381,10 @@ class TorNetworkManager:
                 # Create instance directory
                 instance_dir = f'/var/local/tor/subnet_{subnet}_{i}'
                 os.makedirs(instance_dir, exist_ok=True)
-                os.chmod(instance_dir, 0o700)
-
-                # Get ports for this subnet instance (using numeric ID)
-                ports = self.config_manager.get_instance_ports(numeric_id)
-
-                # Create Tor configuration using ConfigManager
+                os.chmod(instance_dir, 0o700)                # Get ports for this subnet instance (using numeric ID)
+                ports = self.config_manager.get_port_assignment(numeric_id)                # Create Tor configuration using ConfigManager
                 tor_config_path = self.config_manager.create_tor_config(
                     instance_id=numeric_id,
-                    instance_dir=instance_dir,
                     subnet=subnet
                 )
 
@@ -468,9 +397,10 @@ class TorNetworkManager:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE
                 )
-                self.subnet_tor_processes[subnet_key][instance_id] = process
+                self.subnet_tor_processes[subnet_key][instance_id] = process                
                 privoxy_config_path = self.config_manager.create_privoxy_config(
-                    instance_id=numeric_id
+                    instance_id=numeric_id,
+                    tor_socks_port=ports['socks_port']
                 )
 
                 # Start Privoxy instance
@@ -494,43 +424,7 @@ class TorNetworkManager:
                 })
 
             # Update HAProxy configuration with subnet instances
-            main_instances = []
-            for i in range(1, self.stats.get('tor_instances', 0) + 1):
-                if i in self.tor_processes and self.tor_processes[i].poll() is None:
-                    ports = self.config_manager.get_instance_ports(i)
-                    main_instances.append({
-                        'id': i,
-                        'socks_port': ports['socks_port'],
-                        'ctrl_port': ports['ctrl_port'],
-                        'http_port': ports['http_port']
-                    })
-
-            # Prepare subnet instances dict for HAProxy config
-            subnet_instances_dict = {}
-            for subnet_key, processes in self.subnet_tor_processes.items():
-                if processes:  # Only include subnets with running processes
-                    subnet_name = subnet_key.split('.')[0:3]
-                    subnet_name = '.'.join(subnet_name)
-                    subnet_instances_dict[subnet_key] = []
-
-                    for instance_id in processes.keys():
-                        # Extract numeric ID from string instance_id (e.g., "185.220_1" -> 1)
-                        numeric_id = int(instance_id.split('_')[-1])
-                        ports = self.config_manager.get_instance_ports(numeric_id)
-                        subnet_instances_dict[subnet_key].append({
-                            'id': instance_id,
-                            'socks_port': ports['socks_port'],
-                            'ctrl_port': ports['ctrl_port'],
-                            'http_port': ports['http_port']
-                        })
-
-            # Update HAProxy config - combine main and subnet instances
-            all_instances = main_instances.copy()
-            for subnet_instances_list in subnet_instances_dict.values():
-                all_instances.extend(subnet_instances_list)
-            
-            self.config_manager.create_haproxy_config(all_instances)
-            self._reload_haproxy()
+            self._update_haproxy_config()
 
             # Add to active subnets
             self.active_subnets.add(subnet_key)
@@ -565,10 +459,59 @@ class TorNetworkManager:
             # Remove from active subnets
             self.active_subnets.discard(subnet_key)
 
+            # Update HAProxy configuration
+            self._update_haproxy_config()
+
             return True
 
         except Exception as e:
             logger.error(f"Error stopping Tor for subnet {subnet}: {e}")
+            return False
+
+    def _update_haproxy_config(self):
+        """Update HAProxy configuration with current instances"""
+        try:
+            # Collect all running instances
+            all_instances = []
+            
+            # Add main instances
+            for i in range(1, self.stats.get('tor_instances', 0) + 1):
+                if i in self.tor_processes and self.tor_processes[i].poll() is None:
+                    ports = self.config_manager.get_port_assignment(i)
+                    all_instances.append({
+                        'id': i,
+                        'socks_port': ports['socks_port'],
+                        'ctrl_port': ports['ctrl_port'],
+                        'http_port': ports['http_port']
+                    })
+
+            # Add subnet instances
+            for subnet_key, processes in self.subnet_tor_processes.items():
+                if processes:  # Only include subnets with running processes
+                    for instance_id in processes.keys():
+                        # Extract numeric ID from string instance_id (e.g., "185.220_1" -> 1)
+                        numeric_id = int(instance_id.split('_')[-1])
+                        ports = self.config_manager.get_port_assignment(numeric_id)
+                        all_instances.append({
+                            'id': instance_id,
+                            'socks_port': ports['socks_port'],
+                            'ctrl_port': ports['ctrl_port'],
+                            'http_port': ports['http_port']
+                        })
+              # Update HAProxy config
+            self.config_manager.haproxy_manager.create_config(all_instances)
+            
+            # Use Runtime API for dynamic update (fallback to traditional reload if needed)
+            success = self.config_manager.haproxy_manager.reload_runtime_api(all_instances)
+            if success:
+                logger.info(f"HAProxy configuration updated with {len(all_instances)} instances via Runtime API")
+            else:
+                logger.error("Failed to update HAProxy configuration")
+                
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error updating HAProxy configuration: {e}")
             return False
 
     def restart_subnet_tor(self, subnet, instances_count=1):
@@ -582,34 +525,21 @@ class TorNetworkManager:
             return False
 
     def _reload_haproxy(self):
-        """Reload HAProxy configuration"""
-        try:
-            # First, validate the config
-            validate_result = subprocess.run(['haproxy', '-c', '-f', '/etc/haproxy/haproxy.cfg'],
-                                             capture_output=True, text=True)
-            if validate_result.returncode != 0:
-                logger.error(
-                    f"HAProxy config validation failed: {validate_result.stderr}")
-                return False
+        """Legacy method - now uses Runtime API for dynamic updates"""
+        # Get current instances for Runtime API update
+        all_instances = []
+        for subnet, processes in self.subnet_tor_processes.items():
+            for instance_id in processes.keys():
+                ports = self.config_manager.get_port_assignment(instance_id)
+                all_instances.append({
+                    'instance_id': instance_id,
+                    'subnet': subnet,
+                    'http_port': ports['http_port']
+                })
+        
+        return self.config_manager.haproxy_manager.reload_runtime_api(all_instances)
 
-            # If validation passes, do graceful reload
-            reload_result = subprocess.run(['pkill', '-HUP', 'haproxy'],
-                                           capture_output=True, text=True)
-            if reload_result.returncode == 0:
-                logger.info("HAProxy reloaded successfully")
-            else:
-                logger.warning(
-                    f"HAProxy reload may have failed: {reload_result.stderr}")
-
-            return True
-
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Error reloading HAProxy: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"Unexpected error reloading HAProxy: {e}")
-            return False
-       # Global manager instance
+# Global manager instance
 tor_manager = TorNetworkManager()
 
 
@@ -627,11 +557,9 @@ def index():
 def api_status():
     """Get current status of all services"""
     service_status = tor_manager.get_service_status()
-    diversity_check = tor_manager.check_subnet_diversity()
 
     return jsonify({
         'services': service_status,
-        'diversity': diversity_check,
         'stats': tor_manager.stats
     })
 
@@ -661,21 +589,6 @@ def api_stop():
             return jsonify({'success': False, 'message': 'Failed to stop services'})
     except Exception as e:
         logger.error(f"Error in stop API: {e}")
-        return jsonify({'success': False, 'message': str(e)})
-
-
-@app.route('/api/config', methods=['POST'])
-def api_config():
-    """Update monitoring configuration"""
-    try:
-        config = request.get_json()
-        success = tor_manager.update_monitoring_config(config)
-        if success:
-            return jsonify({'success': True, 'message': 'Configuration updated'})
-        else:
-            return jsonify({'success': False, 'message': 'Failed to update configuration'})
-    except Exception as e:
-        logger.error(f"Error in config API: {e}")
         return jsonify({'success': False, 'message': str(e)})
 
 
@@ -870,6 +783,82 @@ def api_set_subnet_limit(subnet):
         logger.error(f"Error setting limit for subnet {subnet}: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
+
+@app.route('/api/haproxy/status')
+def api_haproxy_status():
+    """Get HAProxy status"""
+    try:
+        status = {
+            'running': tor_manager.config_manager.haproxy_manager.is_running(),
+            'config_valid': True,  # We'll assume it's valid if we got this far
+            'config_error': None  # Add this as default
+        }
+          # Validate config
+        try:
+            config_path = tor_manager.config_manager.haproxy_manager.config_path
+            validate_cmd = ['haproxy', '-c', '-f', config_path]
+            result = subprocess.run(validate_cmd, capture_output=True, text=True)
+            status['config_valid'] = result.returncode == 0
+            if not status['config_valid']:
+                status['config_error'] = result.stderr
+        except Exception as e:
+            status['config_valid'] = False
+            status['config_error'] = str(e)
+        
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Error getting HAProxy status: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/haproxy/reload', methods=['POST'])
+def api_haproxy_reload():
+    """Reload HAProxy configuration using Runtime API"""
+    try:
+        # Get current instances for Runtime API update
+        all_instances = []
+        for subnet, processes in tor_manager.subnet_tor_processes.items():
+            for instance_id in processes.keys():
+                ports = tor_manager.config_manager.get_port_assignment(instance_id)
+                all_instances.append({
+                    'instance_id': instance_id,
+                    'subnet': subnet,
+                    'http_port': ports['http_port']
+                })
+        
+        success = tor_manager.config_manager.haproxy_manager.reload_runtime_api(all_instances)
+        if success:
+            return jsonify({'success': True, 'message': 'HAProxy reloaded successfully via Runtime API'})
+        else:
+            return jsonify({'success': False, 'message': 'Failed to reload HAProxy'})
+    except Exception as e:
+        logger.error(f"Error reloading HAProxy: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+
+
+@app.route('/api/haproxy/stats', methods=['GET'])
+def api_haproxy_stats():
+    """Get HAProxy statistics via Runtime API"""
+    try:
+        stats = tor_manager.config_manager.haproxy_manager.get_stats()
+        if stats:
+            return jsonify({'success': True, 'stats': stats})
+        else:
+            return jsonify({'success': False, 'message': 'Failed to get HAProxy stats'})
+    except Exception as e:
+        logger.error(f"Error getting HAProxy stats: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/haproxy/backend/servers', methods=['GET'])
+def api_haproxy_backend_servers():
+    """Get backend servers via Runtime API"""
+    try:
+        backend = request.args.get('backend', 'privoxy')
+        servers = tor_manager.config_manager.get_backend_servers(backend)
+        return jsonify({'success': True, 'backend': backend, 'servers': servers})
+    except Exception as e:
+        logger.error(f"Error getting backend servers: {e}")
+        return jsonify({'success': False, 'error': str(e)})
 
 if __name__ == '__main__':
     # Start the monitoring
