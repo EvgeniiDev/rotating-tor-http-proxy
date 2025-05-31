@@ -135,3 +135,45 @@ Remarkably:
 - sed-4.9
 - tor-0.4.8.16
 <!--- BOM-ends. Document ends here too --->
+
+## Troubleshooting
+
+### JavaScript Console Errors
+
+#### `Uncaught SyntaxError: Unexpected identifier 'data'`
+
+This error is related to a syntax issue in the admin panel's JavaScript code. If you encounter this, you need to fix the missing parenthesis in the `then` function of the `stopServices` function.
+
+The error occurs in `templates/admin.html` where there should be:
+
+```javascript
+.then(data => {
+```
+
+But instead it may be written as:
+
+```javascript
+.then data => {
+```
+
+#### `Unchecked runtime.lastError: The message port closed before a response was received`
+
+This is a common warning that appears in Chrome's DevTools console related to Chrome extensions. It's not actually an error in your code but happens when an extension tries to communicate with its background page, but the communication gets interrupted. This warning can be safely ignored.
+
+### Subnet List Not Displaying
+
+If the subnet list isn't displaying in the admin panel:
+
+1. Make sure the admin panel server is properly handling WebSocket connections
+2. Check that the `/api/subnets` endpoint is correctly returning subnet data
+3. Click the "Refresh Data" button to manually fetch subnet information
+4. Check your browser's console for any error messages
+5. Restart the service with `docker-compose down && docker-compose up -d`
+
+### Ensuring WebSockets Work Properly
+
+If you're experiencing issues with real-time updates, make sure that:
+
+1. WebSockets are not being blocked by any firewall or proxy
+2. The Socket.IO client is properly connected to the server
+3. The server-side implementation emits the correct events to the WebSocket clients

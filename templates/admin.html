@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -33,7 +34,7 @@
         .header h1 {
             font-size: 2.5rem;
             margin-bottom: 10px;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
         }
 
         .status-indicator {
@@ -47,9 +48,17 @@
         }
 
         @keyframes pulse {
-            0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(76, 175, 80, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
+            0% {
+                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
+            }
+
+            70% {
+                box-shadow: 0 0 0 10px rgba(76, 175, 80, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
+            }
         }
 
         .stats-grid {
@@ -84,6 +93,48 @@
             opacity: 0.8;
         }
 
+        /* Status color coding */
+        .status-running {
+            color: #4CAF50 !important;
+        }
+
+        .status-starting {
+            color: #FF9800 !important;
+        }
+
+        .status-partial {
+            color: #FFC107 !important;
+        }
+
+        .status-stopped {
+            color: #F44336 !important;
+        }
+
+        .status-indicator-small {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-indicator-small.status-running {
+            background-color: #4CAF50;
+        }
+
+        .status-indicator-small.status-starting {
+            background-color: #FF9800;
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-indicator-small.status-partial {
+            background-color: #FFC107;
+        }
+
+        .status-indicator-small.status-stopped {
+            background-color: #F44336;
+        }
+
         .controls {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 12px;
@@ -104,6 +155,15 @@
             flex-wrap: wrap;
         }
 
+        .service-status {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
         .btn {
             padding: 10px 20px;
             border: none;
@@ -117,7 +177,7 @@
 
         .btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
         }
 
         .btn.danger {
@@ -172,9 +232,19 @@
             background: rgba(76, 175, 80, 0.1);
         }
 
+        .subnet-item.starting {
+            border-left-color: #ff9800;
+            background: rgba(255, 152, 0, 0.1);
+        }
+
         .subnet-item.inactive {
             border-left-color: #f44336;
             background: rgba(244, 67, 54, 0.1);
+        }
+
+        .subnet-item.error {
+            border-left-color: #e91e63;
+            background: rgba(233, 30, 99, 0.1);
         }
 
         .subnet-header {
@@ -203,8 +273,18 @@
             color: white;
         }
 
+        .subnet-toggle.starting {
+            background: #ff9800;
+            color: white;
+        }
+
         .subnet-toggle.inactive {
             background: #f44336;
+            color: white;
+        }
+
+        .subnet-toggle.error {
+            background: #e91e63;
             color: white;
         }
 
@@ -250,13 +330,61 @@
             margin-top: 10px;
         }
 
-        .limit-input {
+        .instances-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .limit-input,
+        .instances-input {
             padding: 5px 10px;
             border: none;
             border-radius: 4px;
             background: rgba(255, 255, 255, 0.9);
             color: #333;
             width: 80px;
+        }
+
+        .restart-btn {
+            padding: 5px 10px;
+            border: none;
+            border-radius: 4px;
+            background: #2196F3;
+            color: white;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all 0.3s ease;
+        }
+
+        .restart-btn:hover {
+            background: #1976D2;
+        }
+
+        .status-indicator-small {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+
+        .status-running {
+            background: #4CAF50;
+        }
+
+        .status-starting {
+            background: #ff9800;
+            animation: pulse 1s infinite;
+        }
+
+        .status-stopped {
+            background: #f44336;
+        }
+
+        .status-error {
+            background: #e91e63;
         }
 
         .last-update {
@@ -292,6 +420,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <div class="header">
@@ -299,22 +428,55 @@
             <p>Real-time management of Tor exit nodes and subnets</p>
         </div>
 
+        <div class="subnets-container">
+            <div class="subnets-header">
+                <h3>Service Management</h3>
+                <div class="control-buttons">
+                    <button class="btn" onclick="startServices()" id="startBtn">Start Services</button>
+                    <button class="btn warning" onclick="restartServices()" id="restartBtn">Restart Services</button>
+                    <button class="btn danger" onclick="stopServices()" id="stopBtn">Stop Services</button>
+                    <button class="btn" onclick="testProxy()" id="testBtn">Test Proxy</button>
+                </div>
+            </div>
+            <div class="service-status" id="serviceStatus">
+                <div class="stat-card">
+                    <span class="stat-number" id="torInstances">-</span>
+                    <span class="stat-label">Tor Instances</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-number" id="runningTor">-</span>
+                    <span class="stat-label">Running Tor</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-number" id="runningPrivoxy">-</span>
+                    <span class="stat-label">Running Privoxy</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-number" id="proxyStatus">-</span>
+                    <span class="stat-label">Proxy Status</span>
+                </div>
+            </div>
+        </div>
         <div class="stats-grid" id="stats">
             <div class="stat-card">
-                <span class="stat-number" id="totalRelays">-</span>
-                <span class="stat-label">Total Relays</span>
+                <span class="stat-number" id="serviceStatus">-</span>
+                <span class="stat-label">Service Status</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-number" id="runningTor">-</span>
+                <span class="stat-label">Running Tor Instances</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-number" id="runningPrivoxy">-</span>
+                <span class="stat-label">Running Privoxy Instances</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-number" id="totalInstances">-</span>
+                <span class="stat-label">Total Instances</span>
             </div>
             <div class="stat-card">
                 <span class="stat-number" id="activeSubnets">-</span>
                 <span class="stat-label">Active Subnets</span>
-            </div>
-            <div class="stat-card">
-                <span class="stat-number" id="blockedSubnets">-</span>
-                <span class="stat-label">Blocked Subnets</span>
-            </div>
-            <div class="stat-card">
-                <span class="stat-number" id="totalSubnets">-</span>
-                <span class="stat-label">Total Subnets</span>
             </div>
         </div>
 
@@ -330,14 +492,14 @@
         <div class="subnets-container">
             <div class="subnets-header">
                 <h3>Subnet Management</h3>
-                <input type="text" class="search-box" placeholder="Search subnets..." 
-                       id="searchInput" onkeyup="filterSubnets()">
+                <input type="text" class="search-box" placeholder="Search subnets..." id="searchInput"
+                    onkeyup="filterSubnets()">
             </div>
-            
+
             <div class="subnet-list" id="subnetList">
                 <div class="loading">Loading subnet data...</div>
             </div>
-            
+
             <div class="last-update" id="lastUpdate">
                 Last updated: Never
             </div>
@@ -346,64 +508,200 @@
 
     <script>
         const socket = io();
-        let subnetsData = [];
-
-        // Socket event handlers
-        socket.on('connect', function() {
+        let subnetsData = [];        // Socket event handlers
+        socket.on('connect', function () {
             console.log('Connected to server');
             updateStatus(true);
+            showNotification('Connected to server', 'success');
+            // Request subnet data immediately on connection
+            refreshData();
         });
 
-        socket.on('disconnect', function() {
+        socket.on('disconnect', function () {
             console.log('Disconnected from server');
             updateStatus(false);
+            showNotification('Connection lost', 'warning');
         });
 
-        socket.on('subnet_update', function(data) {
+        socket.on('subnet_update', function (data) {
             console.log('Received subnet update', data);
-            subnetsData = data.subnets;
-            updateStats(data.stats);
-            renderSubnets();
+            if (data && data.subnets && Array.isArray(data.subnets)) {
+                subnetsData = data.subnets;
+                updateStats(data.stats);
+                renderSubnets();
+                console.log('Subnets rendered:', subnetsData.length);
+            } else {
+                console.error('Invalid subnet data received:', data);
+                showNotification('Invalid subnet data received', 'error');
+            }
         });
 
+        socket.on('subnet_status_update', function (data) {
+            console.log('Received subnet status update', data);
+
+            // Find and update the specific subnet
+            const subnet = subnetsData.find(s => s.subnet === data.subnet);
+            if (subnet) {
+                const oldStatus = subnet.status;
+                subnet.status = data.status;
+
+                if (data.instances_count !== undefined) {
+                    subnet.running_instances = data.instances_count;
+                }
+
+                // Show notification for status changes
+                if (oldStatus !== data.status) {
+                    let message = `Subnet ${data.subnet}: ${getStatusText(data.status)}`;
+                    let type = 'info';
+
+                    if (data.status === 'running') {
+                        type = 'success';
+                        message += ` (${data.instances_count || 1} instances)`;
+                    } else if (data.status === 'error') {
+                        type = 'error';
+                        if (data.error) {
+                            message += ` - ${data.error}`;
+                        }
+                    } else if (data.status === 'starting') {
+                        type = 'info';
+                        message += '...';
+                    }
+
+                    showNotification(message, type);
+                }
+
+                renderSubnets();
+            }
+        });
+
+        socket.on('status_update', function (data) {
+            console.log('Received status update', data);
+            updateServiceStatus(data);
+        });
+
+        socket.on('tor_stats_update', function(data) {
+            console.log("Received tor_stats_update:", data);
+            document.getElementById('activeInstances').textContent = data.stats.running_instances || 0;
+            document.getElementById('activeSubnets').textContent = data.stats.active_subnets || 0;
+            document.getElementById('blockedSubnets').textContent = data.stats.blocked_subnets || 0;
+            document.getElementById('totalTorInstances').textContent = data.stats.tor_instances || 0;
+        });
+
+        // Add notification system
+        function showNotification(message, type = 'info') {
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.className = `notification notification-${type}`;
+            notification.textContent = message;
+            notification.style.animation = 'slideIn 0.3s ease';
+
+            // Add click to dismiss
+            notification.onclick = function () {
+                dismissNotification(notification);
+            };
+
+            // Add to page
+            document.body.appendChild(notification);
+
+            // Auto remove after 5 seconds
+            setTimeout(() => {
+                dismissNotification(notification);
+            }, 5000);
+        }
+
+        function dismissNotification(notification) {
+            if (notification.parentNode) {
+                notification.style.animation = 'slideOut 0.3s ease';
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 300);
+            }
+        }
         function updateStatus(connected) {
-            const indicator = document.getElementById('status');
-            if (connected) {
-                indicator.style.background = '#4CAF50';
-            } else {
-                indicator.style.background = '#f44336';
+            const indicator = document.querySelector('.status-indicator');
+            if (indicator) {
+                if (connected) {
+                    indicator.style.background = '#4CAF50';
+                } else {
+                    indicator.style.background = '#f44336';
+                }
+            }
+        }
+        function updateServiceStatus(data) {
+            console.log('Updating service status:', data);
+
+            // Update status indicator
+            const statusElement = document.getElementById('serviceStatus');
+            if (statusElement) {
+                statusElement.textContent = getServiceStatusText(data.status);
+                statusElement.className = 'stat-number status-' + data.status;
+            }
+
+            // Update instance counts
+            document.getElementById('runningTor').textContent = data.running_tor || 0;
+            document.getElementById('runningPrivoxy').textContent = data.running_privoxy || 0;
+            document.getElementById('totalInstances').textContent = data.total_instances || 0;
+            document.getElementById('activeSubnets').textContent = data.active_subnets || 0;
+
+            // Update last update time
+            if (data.last_update) {
+                document.getElementById('lastUpdate').textContent =
+                    `Last updated: ${data.last_update}`;
+            }
+
+            // Update status indicator in header
+            updateStatus(data.status !== 'stopped');
+        }
+
+        function getServiceStatusText(status) {
+            switch (status) {
+                case 'running': return 'Running';
+                case 'starting': return 'Starting';
+                case 'partial': return 'Partial';
+                case 'stopped': return 'Stopped';
+                default: return 'Unknown';
             }
         }
 
         function updateStats(stats) {
-            document.getElementById('totalRelays').textContent = stats.total_relays || 0;
             document.getElementById('activeSubnets').textContent = stats.active_subnets || 0;
-            document.getElementById('blockedSubnets').textContent = stats.blocked_subnets || 0;
-            document.getElementById('totalSubnets').textContent = (stats.active_subnets || 0) + (stats.blocked_subnets || 0);
-            
+
             if (stats.last_update) {
                 const date = new Date(stats.last_update);
-                document.getElementById('lastUpdate').textContent = 
+                document.getElementById('lastUpdate').textContent =
                     `Last updated: ${date.toLocaleString()}`;
             }
-        }
-
-        function renderSubnets() {
+        } function renderSubnets() {
+            console.log('Rendering subnets, data length:', subnetsData ? subnetsData.length : 0);
             const container = document.getElementById('subnetList');
-            
-            if (subnetsData.length === 0) {
+
+            if (!subnetsData || subnetsData.length === 0) {
                 container.innerHTML = '<div class="loading">No subnet data available</div>';
                 return;
             }
 
-            container.innerHTML = subnetsData.map(subnet => `
-                <div class="subnet-item ${subnet.is_active ? 'active' : 'inactive'}" 
+            container.innerHTML = subnetsData.map(subnet => {
+                const statusClass = subnet.status || 'stopped';
+                const statusText = getStatusText(subnet.status);
+                const buttonClass = subnet.status === 'starting' ? 'starting' :
+                    (subnet.is_active && subnet.status === 'running' ? 'active' : 'inactive');
+                const buttonText = subnet.status === 'starting' ? 'Starting...' :
+                    (subnet.is_active && subnet.status === 'running' ? 'Running' : 'Stopped');
+
+                return `
+                <div class="subnet-item ${statusClass}" 
                      data-subnet="${subnet.subnet}">
                     <div class="subnet-header">
-                        <span class="subnet-name">${subnet.subnet}.0.0/16</span>
-                        <button class="subnet-toggle ${subnet.is_active ? 'active' : 'inactive'}"
-                                onclick="toggleSubnet('${subnet.subnet}')">
-                            ${subnet.is_active ? 'Enabled' : 'Disabled'}
+                        <span class="subnet-name">
+                            <span class="status-indicator-small status-${statusClass}"></span>
+                            ${subnet.subnet}.0.0/16
+                        </span>
+                        <button class="subnet-toggle ${buttonClass}"
+                                onclick="toggleSubnet('${subnet.subnet}')"
+                                ${subnet.status === 'starting' ? 'disabled' : ''}>
+                            ${buttonText}
                         </button>
                     </div>
                     
@@ -417,45 +715,110 @@
                             <span class="subnet-stat-label">Active Relays</span>
                         </div>
                         <div class="subnet-stat">
+                            <span class="subnet-stat-number">${subnet.running_instances || 0}</span>
+                            <span class="subnet-stat-label">Running Instances</span>
+                        </div>
+                        <div class="subnet-stat">
                             <span class="subnet-stat-number">${subnet.countries.length}</span>
                             <span class="subnet-stat-label">Countries</span>
                         </div>
                     </div>
                     
                     <div class="countries">
-                        ${subnet.countries.map(country => 
-                            `<span class="country-tag">${country}</span>`
-                        ).join('')}
+                        ${subnet.countries.map(country =>
+                    `<span class="country-tag">${country}</span>`
+                ).join('')}
                     </div>
                     
                     <div class="limit-control">
-                        <label>Limit:</label>
+                        <label>Relay Limit:</label>
                         <input type="number" class="limit-input" 
                                value="${subnet.limit}" 
                                min="1" max="${subnet.total_relays}"
                                onchange="setSubnetLimit('${subnet.subnet}', this.value)">
                         <span>addresses</span>
                     </div>
+                    
+                    <div class="instances-control">
+                        <label>Instances:</label>
+                        <input type="number" class="instances-input" 
+                               value="${subnet.instances_count || 1}" 
+                               min="1" max="10"
+                               onchange="setSubnetInstances('${subnet.subnet}', this.value)">
+                        <span>tor processes</span>
+                        ${subnet.is_active && subnet.status === 'running' ?
+                        `<button class="restart-btn" onclick="restartSubnet('${subnet.subnet}')">Restart</button>` :
+                        ''}
+                    </div>
                 </div>
-            `).join('');
+            `;
+            }).join('');
         }
 
+        function getStatusText(status) {
+            switch (status) {
+                case 'running': return 'Running';
+                case 'starting': return 'Starting';
+                case 'stopped': return 'Stopped';
+                case 'error': return 'Error';
+                default: return 'Unknown';
+            }        }
+        
         function toggleSubnet(subnet) {
+            console.log(`Toggling subnet: ${subnet}`);
+            
+            // Find current subnet status
+            const subnetData = subnetsData.find(s => s.subnet === subnet);
+            const currentStatus = subnetData ? subnetData.is_active : false;
+            
+            console.log(`Current status for ${subnet}: ${currentStatus}`, subnetData);
+            
+            // Update UI to show starting state
+            const button = document.querySelector(`button[onclick="toggleSubnet('${subnet}')"]`);
+            if (button) {
+                button.disabled = true;
+                button.textContent = currentStatus ? 'Stopping...' : 'Starting...';
+                button.className = 'subnet-toggle starting';
+            }
+
             fetch(`/api/subnet/${subnet}/toggle`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 }
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    console.log(`Subnet ${subnet} toggled to ${data.active ? 'active' : 'inactive'}`);
-                }
-            })
-            .catch(error => {
-                console.error('Error toggling subnet:', error);
-            });
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const action = data.active ? 'started' : 'stopped';
+                        showNotification(data.message || `Subnet ${subnet} ${action}`, data.active ? 'success' : 'info');
+                        console.log(`Subnet ${subnet} toggled to ${data.active ? 'active' : 'inactive'}`);
+                        
+                        // Update the subnet data
+                        if (subnetData) {
+                            subnetData.is_active = data.active;
+                            subnetData.status = data.active ? 'running' : 'stopped';
+                        }
+                          // Refresh the subnet list to update UI
+                        setTimeout(() => {
+                            refreshData();
+                        }, 1000);
+                    } else {
+                        showNotification(`Failed to toggle subnet ${subnet}: ${data.error}`, 'error');
+                        console.error('Toggle error:', data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error toggling subnet:', error);
+                    showNotification(`Error toggling subnet ${subnet}`, 'error');
+                })
+                .finally(() => {
+                    // Reset button state
+                    if (button) {
+                        button.disabled = false;
+                        button.className = 'subnet-toggle';
+                    }
+                });
         }
 
         function setSubnetLimit(subnet, limit) {
@@ -466,62 +829,269 @@
                 },
                 body: JSON.stringify({ limit: parseInt(limit) })
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    console.log(`Subnet ${subnet} limit set to ${data.limit}`);
-                }
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showNotification(`Subnet ${subnet} limit to ${data.limit}`, 'info');
+                        console.log(`Subnet ${subnet} limit set to ${data.limit}`);
+                    } else {
+                        showNotification(`Failed to set limit for ${subnet}: ${data.error}`, 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error setting subnet limit:', error);
+                    showNotification(`Error setting limit for ${subnet}`, 'error');
+                });
+        }
+
+        function setSubnetInstances(subnet, instances) {
+            fetch(`/api/subnet/${subnet}/instances`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ instances: parseInt(instances) })
             })
-            .catch(error => {
-                console.error('Error setting subnet limit:', error);
-            });
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showNotification(`Subnet ${subnet} instances set to ${data.instances}`, 'info');
+                        console.log(`Subnet ${subnet} instances set to ${data.instances}`);
+                    } else {
+                        showNotification(`Failed to set instances for ${subnet}: ${data.error}`, 'error');
+                        console.error('Error setting instances:', data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error setting subnet instances:', error);
+                    showNotification(`Error setting instances for ${subnet}`, 'error');
+                });
+        }        function restartSubnet(subnet) {
+            if (confirm(`Are you sure you want to restart instances for subnet ${subnet}?`)) {
+                showNotification(`Restarting subnet ${subnet}...`, 'info');
+
+                fetch(`/api/subnet/${subnet}/restart`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ instances: 1 })
+                })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            showNotification(data.message || `Subnet ${subnet} restarted successfully`, 'success');
+                            console.log(`Subnet ${subnet} instances restarted`);
+                            
+                            // Update subnet data
+                            const subnetData = subnetsData.find(s => s.subnet === subnet);
+                            if (subnetData) {
+                                subnetData.is_active = true;
+                                subnetData.status = 'running';
+                            }
+                              // Refresh the subnet list
+                            setTimeout(() => {
+                                refreshData();
+                            }, 1000);
+                        } else {
+                            showNotification(`Failed to restart ${subnet}: ${data.error}`, 'error');
+                            console.error('Error restarting subnet:', data.error);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error restarting subnet:', error);
+                        showNotification(`Error restarting ${subnet}`, 'error');
+                    });
+            }
         }
 
         function enableAllSubnets() {
-            subnetsData.forEach(subnet => {
-                if (!subnet.is_active) {
-                    toggleSubnet(subnet.subnet);
-                }
+            const inactiveSubnets = subnetsData.filter(subnet => !subnet.is_active);
+            if (inactiveSubnets.length === 0) {
+                showNotification('All subnets are already active', 'info');
+                return;
+            }
+
+            showNotification(`Enabling ${inactiveSubnets.length} subnets...`, 'info');
+            inactiveSubnets.forEach(subnet => {
+                toggleSubnet(subnet.subnet);
             });
         }
 
         function disableAllSubnets() {
-            subnetsData.forEach(subnet => {
-                if (subnet.is_active) {
-                    toggleSubnet(subnet.subnet);
-                }
+            const activeSubnets = subnetsData.filter(subnet => subnet.is_active);
+            if (activeSubnets.length === 0) {
+                showNotification('All subnets are already inactive', 'info');
+                return;
+            }
+
+            showNotification(`Disabling ${activeSubnets.length} subnets...`, 'info');
+            activeSubnets.forEach(subnet => {
+                toggleSubnet(subnet.subnet);
             });
         }
 
         function refreshData() {
+            showNotification('Refreshing subnet data...', 'info');
             fetch('/api/subnets')
-            .then(response => response.json())
-            .then(data => {
-                subnetsData = data.subnets;
-                updateStats(data.stats);
-                renderSubnets();
-            })
-            .catch(error => {
-                console.error('Error refreshing data:', error);
-            });
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Server responded with status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data && data.success && data.subnets) {
+                        console.log(`Received ${data.subnets.length} subnets`);
+                        subnetsData = data.subnets;
+                        updateStats(data.stats);
+                        renderSubnets();
+                        showNotification(`Successfully loaded ${data.subnets.length} subnets`, 'success');
+                    } else {
+                        console.error('Invalid data structure received:', data);
+                        showNotification(`Error: ${data.error || 'Invalid data received'}`, 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error refreshing data:', error);
+                    showNotification('Failed to refresh data: ' + error.message, 'error');
+                });
         }
 
         function filterSubnets() {
             const search = document.getElementById('searchInput').value.toLowerCase();
             const items = document.querySelectorAll('.subnet-item');
-            
+
+            let visibleCount = 0;
             items.forEach(item => {
                 const subnet = item.dataset.subnet;
                 if (subnet.includes(search)) {
                     item.style.display = 'block';
+                    visibleCount++;
                 } else {
                     item.style.display = 'none';
                 }
             });
+
+            if (search && visibleCount === 0) {
+                showNotification(`No subnets found matching "${search}"`, 'info');
+            }
         }
 
-        // Initial data load
-        refreshData();
+        // Service management functions
+        function startServices() {
+            showNotification('Starting services...', 'info');
+            fetch('/api/services/start', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showNotification('Services started successfully', 'success');
+                        updateServiceStatus(data.status);
+                    } else {
+                        showNotification('Failed to start services', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error starting services:', error);
+                    showNotification('Error starting services', 'error');
+                });
+        }
+
+        function stopServices() {
+            showNotification('Stopping services...', 'info');
+            fetch('/api/services/stop', { method: 'POST' })
+                .then(response => response.json())
+                .then((data) => {
+                    if (data.success) {
+                        showNotification('Services stopped successfully', 'success');
+                        updateServiceStatus(data.status);
+                    } else {
+                        showNotification('Failed to stop services', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error stopping services:', error);
+                    showNotification('Error stopping services', 'error');
+                });
+        }
+
+        function restartServices() {
+            showNotification('Restarting services...', 'info');
+            fetch('/api/services/restart', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showNotification('Services restarted successfully', 'success');
+                        updateServiceStatus(data.status);
+                    } else {
+                        showNotification('Failed to restart services', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error restarting services:', error);
+                    showNotification('Error restarting services', 'error');
+                });
+        }
+
+        function testProxy() {
+            showNotification('Testing proxy...', 'info');
+            fetch('/api/test-proxy')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showNotification(`Proxy working! Exit IP: ${data.ip}`, 'success');
+                        document.getElementById('proxyStatus').textContent = 'Working';
+                    } else {
+                        showNotification(`Proxy test failed: ${data.error}`, 'error');
+                        document.getElementById('proxyStatus').textContent = 'Failed';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error testing proxy:', error);
+                    showNotification('Error testing proxy', 'error');
+                    document.getElementById('proxyStatus').textContent = 'Error';
+                });
+        }
+
+        function updateServiceStatus(status) {
+            document.getElementById('torInstances').textContent = status.total_instances || 0;
+            document.getElementById('runningTor').textContent = status.running_tor || 0;
+            document.getElementById('runningPrivoxy').textContent = status.running_privoxy || 0;
+
+            const statusText = status.services_started ? 'Running' : 'Stopped';
+            document.getElementById('proxyStatus').textContent = statusText;
+        }
+
+        function refreshServiceStatus() {
+            fetch('/api/services/status')
+                .then(response => response.json())
+                .then(data => {
+                    updateServiceStatus(data);
+                })
+                .catch(error => {
+                    console.error('Error refreshing service status:', error);
+                });
+        }
+
+        // Initial data load (only on page load, Socket.IO will handle updates)
+        document.addEventListener('DOMContentLoaded', function () {
+            refreshData();
+            refreshServiceStatus();
+            // Refresh service status every 10 seconds
+            setInterval(refreshServiceStatus, 10000);
+        });
+
+        // Handle Socket.IO errors
+        socket.on('error', function (error) {
+            console.error('Socket.IO error:', error);
+            showNotification('Server error: ' + (error.message || 'Unknown error'), 'error');
+        });
+
+        socket.on('connect_error', function (error) {
+            console.error('Socket.IO connection error:', error);
+            showNotification('Connection error: ' + error.message, 'error');
+        });
     </script>
 </body>
+
 </html>
