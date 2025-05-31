@@ -1,4 +1,4 @@
-FROM alpine:latest
+FROM python:3.13.3-alpine3.22
 
 ENV \
     # sets the number of tor instances
@@ -8,23 +8,20 @@ ENV \
 
 EXPOSE 3128/tcp 4444/tcp 5000/tcp
 
-COPY tor.cfg privoxy.cfg haproxy.cfg start.sh start_with_admin.sh admin_panel.py requirements.txt ./
+COPY tor.cfg privoxy.cfg haproxy.cfg start_with_admin.sh admin_panel.py config_manager.py requirements.txt ./
 COPY templates/ templates/
 
-RUN apk --no-cache --no-progress --quiet upgrade && \
-    # alpine has a POSIX sed from busybox, for the log re-formatting, GNU sed is required to converting a capture group to lowercase
-    apk --no-cache --no-progress --quiet add tor bash privoxy haproxy curl sed python3 py3-pip && \
-    # Install Python dependencies using --break-system-packages for Alpine
-    pip3 install --no-cache-dir --break-system-packages -r requirements.txt && \
-    #
-    # directories and files
+RUN apk --no-cache --no-progress --quiet add tor bash privoxy haproxy curl sed && \
+    # Install Python dependencies (no need for --break-system-packages with official Python image)
+    pip3 install --no-cache-dir -r requirements.txt && \
+    # move configuration files
     mv /tor.cfg /etc/tor/torrc.default && \
     mv /privoxy.cfg /etc/privoxy/config.templ && \
-    mv /haproxy.cfg /etc/haproxy/haproxy.cfg.default && \    chmod +x /start.sh && \
+    mv /haproxy.cfg /etc/haproxy/haproxy.cfg.default && \
     chmod +x /start_with_admin.sh && \
     chmod +x /admin_panel.py && \
     #
-    # prepare for low-privilege execution \
+    # prepare for low-privilege execution
     addgroup proxy && \
     adduser -S -D -u 1000 -G proxy proxy && \
     touch /etc/haproxy/haproxy.cfg && \
@@ -38,8 +35,15 @@ RUN apk --no-cache --no-progress --quiet upgrade && \
     chown -R proxy: /etc/privoxy/ && \
     mkdir -p /var/local/tor && \
     chown -R proxy: /var/local/tor && \
+    mkdir -p /var/lib/tor && \
+    chown -R proxy: /var/lib/tor && \
+    mkdir -p /var/log/tor && \
+    chown -R proxy: /var/log/tor && \
+    mkdir -p /var/run/tor && \
+    chown -R proxy: /var/run/tor && \
     mkdir -p /var/local/privoxy && \
     chown -R proxy: /var/local/privoxy && \
+    mkdir -p /var/log/privoxy && \
     chown -R proxy: /var/log/privoxy && \
     #
     # cleanup
