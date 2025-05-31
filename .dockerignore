@@ -1,0 +1,19 @@
+# Exclude development files
+.git
+.gitignore
+README.md
+LICENSE
+*.md
+images/
+run.bat
+
+# Exclude Docker files from being copied into the image
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Exclude any local development files
+.vscode/
+.idea/
+*.log
+*.tmp
