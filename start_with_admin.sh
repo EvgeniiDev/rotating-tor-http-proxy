@@ -54,9 +54,9 @@ cp /etc/haproxy/haproxy.cfg.default /etc/haproxy/haproxy.cfg
 # same "reset" logic as above
 cp /etc/tor/torrc.default /etc/tor/torrc
 
-# Ensure proper permissions for tmp directory
-mkdir -p /tmp
-chmod 777 /tmp
+# Ensure proper permissions for tmp directory (use user's home tmp)
+export TMPDIR=/home/proxy/tmp
+mkdir -p "$TMPDIR"
 
 if [[ -n $TOR_EXIT_COUNTRY ]]; then
     IFS=', ' read -r -a countries <<< "$TOR_EXIT_COUNTRY"

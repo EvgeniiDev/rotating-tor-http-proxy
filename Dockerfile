@@ -4,18 +4,22 @@ ENV \
     # sets the number of tor instances
     TOR_INSTANCES=10 \
     # sets the interval (in seconds) to rebuild tor circuits
-    TOR_REBUILD_INTERVAL=1800
+    TOR_REBUILD_INTERVAL=1800 \
+    # set temp directory to user's home
+    TMPDIR=/home/proxy/tmp
 
 EXPOSE 3128/tcp 4444/tcp 5000/tcp
 
-COPY tor.cfg privoxy.cfg haproxy.cfg start_with_admin.sh admin_panel.py config_manager.py requirements.txt ./
+# Install system packages in separate layer for better caching
+RUN apk --no-cache --no-progress --quiet add tor bash privoxy haproxy curl sed
+
+COPY requirements.txt ./
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+COPY tor.cfg privoxy.cfg haproxy.cfg start_with_admin.sh admin_panel.py config_manager.py haproxy_manager.py ./
 COPY templates/ templates/
 
-RUN apk --no-cache --no-progress --quiet add tor bash privoxy haproxy curl sed && \
-    # Install Python dependencies (no need for --break-system-packages with official Python image)
-    pip3 install --no-cache-dir -r requirements.txt && \
-    # move configuration files
-    mv /tor.cfg /etc/tor/torrc.default && \
+RUN mv /tor.cfg /etc/tor/torrc.default && \
     mv /privoxy.cfg /etc/privoxy/config.templ && \
     mv /haproxy.cfg /etc/haproxy/haproxy.cfg.default && \
     chmod +x /start_with_admin.sh && \
@@ -30,6 +34,9 @@ RUN apk --no-cache --no-progress --quiet add tor bash privoxy haproxy curl sed &
     chown -R proxy: /var/lib/haproxy && \
     mkdir -p /var/local/haproxy && \
     chown -R proxy: /var/local/haproxy && \
+    # Create the server state file for HAProxy
+    touch /var/local/haproxy/server-state && \
+    chown proxy: /var/local/haproxy/server-state && \
     touch /etc/tor/torrc && \
     chown -R proxy: /etc/tor/ && \
     chown -R proxy: /etc/privoxy/ && \
@@ -45,6 +52,9 @@ RUN apk --no-cache --no-progress --quiet add tor bash privoxy haproxy curl sed &
     chown -R proxy: /var/local/privoxy && \
     mkdir -p /var/log/privoxy && \
     chown -R proxy: /var/log/privoxy && \
+    # Create a writable tmp directory for the proxy user
+    mkdir -p /home/proxy/tmp && \
+    chown -R proxy: /home/proxy/tmp && \
     #
     # cleanup
     #
