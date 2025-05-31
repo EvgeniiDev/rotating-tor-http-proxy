@@ -11,16 +11,14 @@ ENV \
 EXPOSE 3128/tcp 4444/tcp 5000/tcp
 
 # Install system packages in separate layer for better caching
-RUN apk --no-cache --no-progress --quiet add tor bash privoxy haproxy curl sed socat
+RUN apk --no-cache --no-progress --quiet add tor bash haproxy curl sed socat
 
 COPY src/requirements.txt ./
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 COPY src/ ./
 
-RUN mv /tor.cfg /etc/tor/torrc.default && \
-    mv /privoxy.cfg /etc/privoxy/config.templ && \
-    mv /haproxy.cfg /etc/haproxy/haproxy.cfg.default && \
+RUN mv /haproxy.cfg /etc/haproxy/haproxy.cfg.default && \
     chmod +x /start_with_admin.sh && \
     chmod +x /admin_panel.py && \
     #
@@ -38,7 +36,6 @@ RUN mv /tor.cfg /etc/tor/torrc.default && \
     chown proxy: /var/local/haproxy/server-state && \
     touch /etc/tor/torrc && \
     chown -R proxy: /etc/tor/ && \
-    chown -R proxy: /etc/privoxy/ && \
     mkdir -p /var/local/tor && \
     chown -R proxy: /var/local/tor && \
     mkdir -p /var/lib/tor && \
@@ -47,10 +44,6 @@ RUN mv /tor.cfg /etc/tor/torrc.default && \
     chown -R proxy: /var/log/tor && \
     mkdir -p /var/run/tor && \
     chown -R proxy: /var/run/tor && \
-    mkdir -p /var/local/privoxy && \
-    chown -R proxy: /var/local/privoxy && \
-    mkdir -p /var/log/privoxy && \
-    chown -R proxy: /var/log/privoxy && \
     # Create a writable tmp directory for the proxy user
     mkdir -p /home/proxy/tmp && \
     chown -R proxy: /home/proxy/tmp && \
@@ -59,8 +52,6 @@ RUN mv /tor.cfg /etc/tor/torrc.default && \
     #
     # tor
     rm -rf /etc/tor/torrc.sample && \
-    # privoxy
-    rm -rf /etc/privoxy/*.new /etc/logrotate.d/privoxy && \
     # files like /etc/shadow-, /etc/passwd-
     find / -xdev -type f -regex '.*-$' -exec rm -f {} \; && \
     # temp and cache

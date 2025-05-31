@@ -5,7 +5,7 @@ services:
     build: .
     container_name: tor-proxy-with-admin
     ports:
-      - "3128:3128"  # HTTP proxy port
+      - "1080:1080"  # SOCKS5 proxy port
       - "4444:4444"  # HAProxy stats
       - "5000:5000"  # Admin panel
     environment:
@@ -14,7 +14,6 @@ services:
       # - TOR_EXIT_COUNTRY=US,GB,DE  # Optional: specify exit countries
     volumes:
       - tor_data:/var/local/tor
-      - privoxy_data:/var/local/privoxy
     restart: unless-stopped
     networks:
       - tor_network
@@ -25,4 +24,3 @@ networks:
 
 volumes:
   tor_data:
-  privoxy_data:

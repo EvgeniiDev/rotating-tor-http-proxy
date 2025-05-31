@@ -22,9 +22,8 @@ cleanup() {
     if [[ -n $ADMIN_PANEL_PID ]]; then
         kill $ADMIN_PANEL_PID 2>/dev/null
     fi
-    # Kill all tor and privoxy processes
+    # Kill all tor processes
     pkill -f tor 2>/dev/null
-    pkill -f privoxy 2>/dev/null
     pkill -f haproxy 2>/dev/null
     exit 0
 }
@@ -49,40 +48,8 @@ base_http_port=30000
 
 log "Initializing configuration files..."
 
-# "reset" the HAProxy config file because it may contain the previous Privoxy instances information from the previous docker run
+# "reset" the HAProxy config file because it may contain the previous instances information from the previous docker run
 cp /etc/haproxy/haproxy.cfg.default /etc/haproxy/haproxy.cfg
-# same "reset" logic as above
-cp /etc/tor/torrc.default /etc/tor/torrc
-
-# Ensure proper permissions for tmp directory (use user's home tmp)
-export TMPDIR=/home/proxy/tmp
-mkdir -p "$TMPDIR"
-
-if [[ -n $TOR_EXIT_COUNTRY ]]; then
-    IFS=', ' read -r -a countries <<< "$TOR_EXIT_COUNTRY"
-    value=""
-    is_first=1
-    for country in "${countries[@]}"
-    do
-        country=$(xargs <<< "$country")
-        length=${#country}
-        if [[ $length -ne 2 ]]; then
-            continue
-        fi
-        if [[ $is_first -ne 1 ]]; then
-            value="$value,"
-        else
-            is_first=0
-        fi
-        value="$value{$country}"
-    done
-    if [[ -n $value ]]; then
-        echo "ExitNodes $value" >> /etc/tor/torrc
-        log "Setting ExitNodes to $value"
-    fi
-fi
-
-log "Configuration files initialized. Tor instances will be managed through the Admin Panel."
 
 # Start HAProxy with empty backend configuration (will be populated by admin panel)
 log "Starting HAProxy load balancer..."
