@@ -88,6 +88,16 @@
             transform: translateY(-2px);
         }
 
+        .stat-card.free-subnets {
+            background: rgba(76, 175, 80, 0.2);
+            border-color: rgba(76, 175, 80, 0.3);
+        }
+
+        .stat-card.occupied-subnets {
+            background: rgba(255, 152, 0, 0.2);
+            border-color: rgba(255, 152, 0, 0.3);
+        }
+
         .stat-number {
             font-size: 1.6rem;
             font-weight: bold;
@@ -509,48 +519,32 @@
                     </div>
                 </div>
             </div>
-            <div class="service-status" id="serviceStatus">
-                <div class="stat-card">
-                    <span class="stat-number" id="torInstances">-</span>
-                    <span class="stat-label">Tor Instances</span>
-                </div>
-                <div class="stat-card">
-                    <span class="stat-number" id="runningTor">-</span>
-                    <span class="stat-label">Running Tor</span>
-                </div>
-                <div class="stat-card">
-                    <span class="stat-number" id="runningSocks">-</span>
-                    <span class="stat-label">SOCKS5 Proxies</span>
-                </div>
-                <div class="stat-card">
-                    <span class="stat-number" id="proxyStatus">-</span>
-                    <span class="stat-label">Proxy Status</span>
-                </div>
-            </div>
-        </div>        <div class="stats-grid" id="stats">
+        </div>
+        <div class="stats-grid" id="stats">
             <div class="stat-card">
-                <span class="stat-number" id="serviceStatus">-</span>
-                <span class="stat-label">Service Status</span>
+                <span class="stat-number" id="totalSubnets">-</span> <span class="stat-label">📊 Total Subnets</span>
             </div>
-            <div class="stat-card">
-                <span class="stat-number" id="totalInstances">-</span>
-                <span class="stat-label">Total Instances</span>
+            <div class="stat-card free-subnets" title="Подсети без запущенных Tor инстансов">
+                <span class="stat-number" id="freeSubnets">-</span>
+                <span class="stat-label">🟢 Free Subnets</span>
+            </div>
+            <div class="stat-card occupied-subnets" title="Подсети с запущенными Tor инстансами">
+                <span class="stat-number" id="occupiedSubnets">-</span>
+                <span class="stat-label">🟡 Occupied Subnets</span>
             </div>
             <div class="stat-card">
                 <span class="stat-number" id="activeSubnets">-</span>
-                <span class="stat-label">Active Subnets</span>
-            </div>            <div class="stat-card">
-                <span class="stat-number" id="totalSubnets">-</span>
-                <span class="stat-label">Total Subnets</span>
+                <span class="stat-label">✅ Active Subnets</span>
             </div>
             <div class="stat-card">
                 <span class="stat-number" id="inactiveSubnets">-</span>
-                <span class="stat-label">Inactive Subnets</span>
+                <span class="stat-label">⭕ Inactive Subnets</span>
             </div>
         </div>
         <div class="subnets-container">
             <div class="subnets-header">
-                <h3>Subnet Management</h3>                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <h3>Subnet Management</h3>
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                     <input type="text" class="search-box" placeholder="Search subnets..." id="searchInput"
                         onkeyup="filterSubnets()" style="flex: 1; min-width: 200px;">
                 </div>
@@ -564,7 +558,8 @@
                 Last updated: Never
             </div>
         </div>
-    </div>    <script>        const socket = io();
+    </div>
+    <script>        const socket = io();
         let subnetsData = [];
 
         // Socket event handlers
@@ -687,81 +682,32 @@
                     indicator.style.background = '#f44336';
                 }
             }
-        }
-        function updateServiceStatus(data) {
-            console.log('Updating service status:', data);
-
-            // Update status indicator
-            const statusElement = document.getElementById('serviceStatus');
-            if (statusElement) {
-                statusElement.textContent = getServiceStatusText(data.status);
-                statusElement.className = 'stat-number status-' + data.status;
-            }
-
-            // Update instance counts with safe element access
-            const runningTorElement = document.getElementById('runningTor');
-            const runningSocksElement = document.getElementById('runningSocks');
-            const totalInstancesElement = document.getElementById('totalInstances');
-            const activeSubnetsElement = document.getElementById('activeSubnets');
-            const lastUpdateElement = document.getElementById('lastUpdate');
-
-            if (runningTorElement) {
-                runningTorElement.textContent = data.running_tor || 0;
-            }
-            if (runningSocksElement) {
-                runningSocksElement.textContent = data.running_tor || 0;
-            }
-            if (totalInstancesElement) {
-                totalInstancesElement.textContent = data.total_instances || 0;
-            }
-            if (activeSubnetsElement) {
-                activeSubnetsElement.textContent = data.active_subnets || 0;
-            }
-
-            // Update last update time
-            if (data.last_update && lastUpdateElement) {
-                lastUpdateElement.textContent = `Last updated: ${data.last_update}`;
-            }
-
-            // Update status indicator in header
-            updateStatus(data.status !== 'stopped');
-        }
-
-        function getServiceStatusText(status) {
-            switch (status) {
-                case 'running': return 'Running';
-                case 'starting': return 'Starting';
-                case 'partial': return 'Partial';
-                case 'stopped': return 'Stopped';
-                default: return 'Unknown';
-            }
-        }
-        function updateStats(stats) {
+        } function updateStats(stats) {
             if (!stats) return;
-
-            const activeSubnetsElement = document.getElementById('activeSubnets');
-            if (activeSubnetsElement) {
-                activeSubnetsElement.textContent = stats.active_subnets || 0;
-            }
-
-            const blockedSubnetsElement = document.getElementById('blockedSubnets');
-            if (blockedSubnetsElement) {
-                blockedSubnetsElement.textContent = stats.blocked_subnets || 0;
-            }
 
             const totalSubnetsElement = document.getElementById('totalSubnets');
             if (totalSubnetsElement) {
                 totalSubnetsElement.textContent = stats.total_subnets || 0;
             }
 
-            const torInstancesElement = document.getElementById('torInstances');
-            if (torInstancesElement) {
-                torInstancesElement.textContent = stats.tor_instances || 0;
+            const activeSubnetsElement = document.getElementById('activeSubnets');
+            if (activeSubnetsElement) {
+                activeSubnetsElement.textContent = stats.active_subnets || 0;
+            }            // Add new statistics
+            const freeSubnetsElement = document.getElementById('freeSubnets');
+            if (freeSubnetsElement) {
+                freeSubnetsElement.textContent = stats.free_subnets || 0;
             }
 
-            const runningInstancesElement = document.getElementById('runningInstances');
-            if (runningInstancesElement) {
-                runningInstancesElement.textContent = stats.running_instances || 0;
+            const occupiedSubnetsElement = document.getElementById('occupiedSubnets');
+            if (occupiedSubnetsElement) {
+                occupiedSubnetsElement.textContent = stats.occupied_subnets || 0;
+            }
+
+            const inactiveSubnetsElement = document.getElementById('inactiveSubnets');
+            if (inactiveSubnetsElement) {
+                const inactiveCount = (stats.total_subnets || 0) - (stats.active_subnets || 0);
+                inactiveSubnetsElement.textContent = inactiveCount;
             }
 
             if (stats.last_update) {
@@ -770,7 +716,8 @@
                 if (lastUpdateElement) {
                     lastUpdateElement.textContent = `Last updated: ${date.toLocaleString()}`;
                 }
-            }        } function renderSubnets() {
+            }
+        } function renderSubnets() {
             console.log('Rendering subnets, data length:', subnetsData ? subnetsData.length : 0);
             const container = document.getElementById('subnetList');
 
@@ -848,17 +795,18 @@
                             ''}
                         </div>
                     </div>
-                </div>            `;                }).join('');
-                
+                </div>            `;
+                }).join('');
+
             } catch (error) {
                 console.error('Error rendering subnets:', error);
                 container.innerHTML = '<div class="loading">Error rendering subnet data</div>';
             }// Update the button text with inactive subnets count
             updateStartInactiveButton();
-            
+
             // Update subnet counters
             updateSubnetCounters();
-        }function getStatusText(status) {
+        } function getStatusText(status) {
             switch (status) {
                 case 'active': return 'Active';
                 case 'available': return 'Available';
@@ -868,17 +816,18 @@
                 case 'error': return 'Error';
                 default: return 'Unknown';
             }
-        }        function updateStartInactiveButton() {
-            const inactiveCount = subnetsData.filter(subnet =>
-                subnet.status !== 'active' && subnet.status !== 'starting'
+        } function updateStartInactiveButton() {
+            const availableCount = subnetsData.filter(subnet =>
+                (!subnet.running_instances || subnet.running_instances === 0) &&
+                subnet.status !== 'starting'
             ).length;
 
             const button = document.getElementById('startSelectedBtn');
             const customInput = document.getElementById('customSubnetCount');
-            
+
             if (button) {
-                if (inactiveCount > 0) {
-                    button.textContent = `🚀 Start Selected (${inactiveCount} available)`;
+                if (availableCount > 0) {
+                    button.textContent = `🚀 Start Selected (${availableCount} available)`;
                     button.disabled = false;
                     button.style.background = '#2196F3';
                 } else {
@@ -887,23 +836,24 @@
                     button.style.background = '#4CAF50';
                 }
             }
-            
+
             // Update custom input placeholder and max value
             if (customInput) {
-                customInput.placeholder = `Enter number (max ${inactiveCount})`;
-                customInput.max = inactiveCount;
-            }        }
+                customInput.placeholder = `Enter number (max ${availableCount})`;
+                customInput.max = availableCount;
+            }
+        }
 
         function startSelectedSubnets() {
             const selectElement = document.getElementById('subnetCountSelect');
-            const customInput = document.getElementById('customSubnetCount');
-              // Find all inactive subnets first
-            const inactiveSubnets = subnetsData.filter(subnet =>
-                subnet.status !== 'active' && subnet.status !== 'starting'
+            const customInput = document.getElementById('customSubnetCount');              // Find all subnets without running instances
+            const availableSubnets = subnetsData.filter(subnet =>
+                (!subnet.running_instances || subnet.running_instances === 0) &&
+                subnet.status !== 'starting'
             );
 
-            if (inactiveSubnets.length === 0) {
-                showNotification('All subnets are already active or starting', 'info');
+            if (availableSubnets.length === 0) {
+                showNotification('All available subnets already have running instances', 'info');
                 return;
             }
 
@@ -913,26 +863,23 @@
                 if (!selectedCount || selectedCount < 1) {
                     showNotification('Please enter a valid number for custom amount', 'warning');
                     return;
-                }
-                if (selectedCount > inactiveSubnets.length) {
-                    showNotification(`Cannot start ${selectedCount} subnets - only ${inactiveSubnets.length} inactive subnet(s) available`, 'warning');
+                } if (selectedCount > availableSubnets.length) {
+                    showNotification(`Cannot start ${selectedCount} subnets - only ${availableSubnets.length} subnet(s) available without running instances`, 'warning');
                     return;
                 }
             } else if (selectedCount !== 'all') {
                 selectedCount = parseInt(selectedCount);
-            }
-
-            // Determine how many to start
+            }            // Determine how many to start
             let subnetsToStart;
             if (selectedCount === 'all') {
-                subnetsToStart = inactiveSubnets;
+                subnetsToStart = availableSubnets;
             } else {
-                subnetsToStart = inactiveSubnets.slice(0, selectedCount);
+                subnetsToStart = availableSubnets.slice(0, selectedCount);
             }
 
             const count = subnetsToStart.length;
-            const subnetList = subnetsToStart.slice(0, 10).map(s => s.subnet).join(', ') + 
-                             (subnetsToStart.length > 10 ? '...' : '');
+            const subnetList = subnetsToStart.slice(0, 10).map(s => s.subnet).join(', ') +
+                (subnetsToStart.length > 10 ? '...' : '');
 
             if (!confirm(`Start Tor on ${count} subnet(s)?\n\nFirst subnets: ${subnetList}`)) {
                 return;
@@ -952,34 +899,34 @@
                     },
                     body: JSON.stringify({ instances: 1 })
                 })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        successCount++;
-                        console.log(`Started subnet ${subnet.subnet}`);
-                    } else {
-                        errorCount++;
-                        console.error(`Failed to start subnet ${subnet.subnet}:`, data.error);
-                    }
-
-                    // Show final notification when all requests are done
-                    if (successCount + errorCount === count) {
-                        if (errorCount === 0) {
-                            showNotification(`Successfully started ${successCount} subnet(s)`, 'success');
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            successCount++;
+                            console.log(`Started subnet ${subnet.subnet}`);
                         } else {
+                            errorCount++;
+                            console.error(`Failed to start subnet ${subnet.subnet}:`, data.error);
+                        }
+
+                        // Show final notification when all requests are done
+                        if (successCount + errorCount === count) {
+                            if (errorCount === 0) {
+                                showNotification(`Successfully started ${successCount} subnet(s)`, 'success');
+                            } else {
+                                showNotification(`Started ${successCount} subnet(s), ${errorCount} failed`, 'warning');
+                            }
+                        }
+                    })
+                    .catch(error => {
+                        errorCount++;
+                        console.error(`Error starting subnet ${subnet.subnet}:`, error);
+
+                        // Show final notification when all requests are done
+                        if (successCount + errorCount === count) {
                             showNotification(`Started ${successCount} subnet(s), ${errorCount} failed`, 'warning');
                         }
-                    }
-                })
-                .catch(error => {
-                    errorCount++;
-                    console.error(`Error starting subnet ${subnet.subnet}:`, error);
-
-                    // Show final notification when all requests are done
-                    if (successCount + errorCount === count) {
-                        showNotification(`Started ${successCount} subnet(s), ${errorCount} failed`, 'warning');
-                    }
-                });
+                    });
             });
         }
         function toggleSubnet(subnet) {
@@ -1159,25 +1106,26 @@
                 .catch(error => {
                     console.error('Error refreshing data:', error);
                     showNotification('Failed to refresh data: ' + error.message, 'error');
-                });        }        function updateSubnetCounters() {
+                });
+        } function updateSubnetCounters() {
             if (!subnetsData || !Array.isArray(subnetsData)) return;
-            
+
             const totalSubnets = subnetsData.length;
-            const inactiveSubnets = subnetsData.filter(subnet => 
+            const inactiveSubnets = subnetsData.filter(subnet =>
                 subnet.status !== 'active' && subnet.status !== 'starting'
             ).length;
-            
+
             // Update the counter elements
             const totalElement = document.getElementById('totalSubnets');
             const inactiveElement = document.getElementById('inactiveSubnets');
-            
+
             if (totalElement) {
                 totalElement.textContent = totalSubnets;
             }
             if (inactiveElement) {
                 inactiveElement.textContent = inactiveSubnets;
             }
-            
+
             console.log(`Subnet counters updated: Total=${totalSubnets}, Inactive=${inactiveSubnets}`);
         }
 
@@ -1200,60 +1148,17 @@
         }
 
         // Service management functions
-        
-        function updateProxyServiceStatus(status) {
-            const torInstancesElement = document.getElementById('torInstances');
-            const runningTorElement = document.getElementById('runningTor');
-            const runningSocksElement = document.getElementById('runningSocks');
-            const proxyStatusElement = document.getElementById('proxyStatus');
 
-            if (torInstancesElement) {
-                torInstancesElement.textContent = status.total_instances || 0;
-            }
-            if (runningTorElement) {
-                runningTorElement.textContent = status.running_tor || 0;
-            }
-            if (runningSocksElement) {
-                runningSocksElement.textContent = status.running_tor || 0;
-            }
-
-            const statusText = status.services_started ? 'Running' : 'Stopped';
-            if (proxyStatusElement) {
-                proxyStatusElement.textContent = statusText;
-            }
-        }
-
-        function refreshServiceStatus() {
-            fetch('/api/status')
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                    }
-                    return response.json();
-                }).then(data => {
-                    if (data) {
-                        updateProxyServiceStatus(data);
-                    } else {
-                        console.warn('No data received from status endpoint');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error refreshing service status:', error);
-                    // Don't show notification for regular status polling errors to avoid spam
-                });
-        }        // Initial data load (only on page load, Socket.IO will handle updates)
+        // Initial data load (only on page load, Socket.IO will handle updates)
         document.addEventListener('DOMContentLoaded', function () {
             refreshData();
-            refreshServiceStatus();
-            // Refresh service status every 10 seconds
-            setInterval(refreshServiceStatus, 10000);
-            
+
             // Add event listener for subnet count select
             const subnetCountSelect = document.getElementById('subnetCountSelect');
             const customInput = document.getElementById('customSubnetCount');
-            
+
             if (subnetCountSelect && customInput) {
-                subnetCountSelect.addEventListener('change', function() {
+                subnetCountSelect.addEventListener('change', function () {
                     if (this.value === 'custom') {
                         customInput.style.display = 'inline-block';
                         customInput.focus();
