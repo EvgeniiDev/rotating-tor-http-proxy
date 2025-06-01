@@ -11,7 +11,8 @@ ENV \
 EXPOSE 3128/tcp 4444/tcp 5000/tcp
 
 # Install system packages in separate layer for better caching
-RUN apk --no-cache --no-progress --quiet add tor bash haproxy curl sed socat
+# Fix HAProxy version to 3.0 for consistent command compatibility and modern features
+RUN apk --no-cache --no-progress --quiet add tor socat haproxy~=3.0
 
 COPY src/requirements.txt ./
 RUN pip3 install --no-cache-dir -r requirements.txt
@@ -65,4 +66,4 @@ STOPSIGNAL SIGINT
 
 USER proxy
 
-CMD ["/start_with_admin.sh"]
+CMD ["sh", "start_with_admin.sh"]
