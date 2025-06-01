@@ -31,21 +31,6 @@ cleanup() {
 # Set up signal handlers
 trap cleanup SIGINT SIGTERM
 
-if ((TOR_INSTANCES < 1 || TOR_INSTANCES > 40)); then
-    log "fatal" "Environment variable TOR_INSTANCES has to be within the range of 1...40"
-    exit 1
-fi
-
-if ((TOR_REBUILD_INTERVAL < 600)); then
-    log "fatal" "Environment variable TOR_REBUILD_INTERVAL has to be bigger than 600 seconds"
-    # otherwise AWS may complain about it, because http://checkip.amazonaws.com is asked too often
-    exit 2
-fi
-
-base_tor_socks_port=10000
-base_tor_ctrl_port=20000
-base_http_port=30000
-
 log "Initializing configuration files..."
 
 # "reset" the HAProxy config file because it may contain the previous instances information from the previous docker run
@@ -58,7 +43,7 @@ HAPROXY_PID=$!
 
 log "Base services started successfully!"
 log "Admin Panel: http://localhost:5000"
-log "Proxy will be available at: http://localhost:3128 (after starting Tor instances through Admin Panel)"
+log "Proxy will be available at: socks5://localhost:1080 (after starting Tor instances through Admin Panel)"
 log "Use the Admin Panel to start and manage Tor instances"
 
 # Wait for admin panel or any process to exit
