@@ -1,7 +1,5 @@
 import logging
 from typing import Dict, Optional
-from haproxy_manager import HAProxyManager
-
 logger = logging.getLogger(__name__)
 
 
@@ -9,7 +7,6 @@ class ConfigManager:
     def __init__(self):
         self.base_tor_socks_port = 10000
         self.base_tor_ctrl_port = 20000
-        self.haproxy_manager = HAProxyManager()
 
     def get_tor_config(self, instance_id: int, socks_port: int, ctrl_port: int,
                        subnet: Optional[str] = None) -> str:
@@ -26,6 +23,13 @@ class ConfigManager:
             "GeoIPFile /usr/share/tor/geoip",
             "GeoIPv6File /usr/share/tor/geoip6",
             "Log notice stdout",
+            "NewCircuitPeriod 30",
+            "MaxCircuitDirtiness 300",
+            "UseEntryGuards 0",
+            "LearnCircuitBuildTimeout 1",
+            "ExitRelay 0",
+            "RefuseUnknownExits 0",
+            "ClientOnly 1"
         ]
 
         if subnet:
@@ -82,8 +86,3 @@ class ConfigManager:
             'socks_port': ports['socks_port'],
             'ctrl_port': ports['ctrl_port']
         }
-
-
-    def get_backend_servers(self, backend: str) -> Dict[str, Dict]:
-        """Get backend servers via Runtime API (delegated to HAProxyManager)"""
-        return self.haproxy_manager.get_backend_servers(backend)

@@ -8,7 +8,7 @@ from flask_socketio import SocketIO
 
 from tor_network_manager import TorNetworkManager
 from models import (
-    SubnetData, Stats, get_current_timestamp, create_success_response, create_error_response
+    SubnetData, get_current_timestamp, create_success_response, create_error_response
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -19,12 +19,10 @@ app.config['SECRET_KEY'] = 'tor-admin-secret-key'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 
-# Initialize the manager
 tor_manager = TorNetworkManager(socketio)
 tor_manager.start_monitoring()
 
 
-# API endpoints
 @app.route('/')
 def index():
     return render_template('admin.html')
@@ -36,11 +34,8 @@ def _create_subnet_data(subnet_counts):
         status = 'active' if subnet in tor_manager.active_subnets else 'available'
         limit = tor_manager.subnet_limits.get(subnet, 1)
         
-        subnet_key = f"subnet_{subnet.replace('.', '_')}"
-        running_instances = len([
-            p for p in tor_manager.subnet_tor_processes.get(subnet_key, {}).values()
-            if p and p.poll() is None
-        ])
+        # Use thread-safe method to get running instances
+        running_instances = tor_manager.get_subnet_running_instances(subnet)
 
         subnet_data = SubnetData(
             subnet=subnet,
@@ -102,7 +97,7 @@ def _handle_service_operation(operation_name, operation_func, *args):
     except Exception as e:
         logger.error(f"Error in {operation_name}: {e}")
         return jsonify(create_error_response(operation_name, str(e))), 500
-        
+
 @app.route('/api/services/start', methods=['POST'])
 def start_services():
     return _handle_service_operation("Service start", tor_manager.start_services)

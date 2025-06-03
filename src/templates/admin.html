@@ -93,11 +93,6 @@
             border-color: rgba(76, 175, 80, 0.3);
         }
 
-        .stat-card.occupied-subnets {
-            background: rgba(255, 152, 0, 0.2);
-            border-color: rgba(255, 152, 0, 0.3);
-        }
-
         .stat-number {
             font-size: 1.6rem;
             font-weight: bold;
@@ -528,10 +523,6 @@
                 <span class="stat-number" id="freeSubnets">-</span>
                 <span class="stat-label">🟢 Free Subnets</span>
             </div>
-            <div class="stat-card occupied-subnets" title="Подсети с запущенными Tor инстансами">
-                <span class="stat-number" id="occupiedSubnets">-</span>
-                <span class="stat-label">🟡 Occupied Subnets</span>
-            </div>
             <div class="stat-card">
                 <span class="stat-number" id="activeSubnets">-</span>
                 <span class="stat-label">✅ Active Subnets</span>
@@ -697,11 +688,6 @@
             const freeSubnetsElement = document.getElementById('freeSubnets');
             if (freeSubnetsElement) {
                 freeSubnetsElement.textContent = stats.free_subnets || 0;
-            }
-
-            const occupiedSubnetsElement = document.getElementById('occupiedSubnets');
-            if (occupiedSubnetsElement) {
-                occupiedSubnetsElement.textContent = stats.occupied_subnets || 0;
             }
 
             const inactiveSubnetsElement = document.getElementById('inactiveSubnets');
