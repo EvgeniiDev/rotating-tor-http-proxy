@@ -39,20 +39,7 @@ RUN mv /haproxy.cfg /etc/haproxy/haproxy.cfg.default && \
     chown -R proxy: /var/run/tor && \
     # Create a writable tmp directory for the proxy user
     mkdir -p /home/proxy/tmp && \
-    chown -R proxy: /home/proxy/tmp && \
-    #
-    # cleanup
-    #
-    # tor
-    rm -rf /etc/tor/torrc.sample && \
-    # files like /etc/shadow-, /etc/passwd-
-    find / -xdev -type f -regex '.*-$' -exec rm -f {} \; && \
-    # temp and cache
-    rm -rf /var/cache/apk/* /usr/share/doc /usr/share/man/ /usr/share/info/* /var/cache/man/* /tmp/* /etc/fstab && \
-    # init scripts
-    rm -rf /etc/init.d /lib/rc /etc/conf.d /etc/inittab /etc/runlevels /etc/rc.conf && \
-    # kernel tunables
-    rm -rf /etc/sysctl* /etc/modprobe.d /etc/modules /etc/mdev.conf /etc/acpi
+    chown -R proxy: /home/proxy/tmp
 
 STOPSIGNAL SIGINT
 
