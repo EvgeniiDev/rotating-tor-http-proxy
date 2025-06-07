@@ -12,8 +12,6 @@ class ConfigManager:
                        subnet: Optional[str] = None) -> str:
         config_lines = [
             f"# Tor Instance {instance_id}",
-            "AvoidDiskWrites 1",
-            "GeoIPExcludeUnknown 1",
             f"SocksPort 127.0.0.1:{socks_port}",
             f"ControlPort 127.0.0.1:{ctrl_port}",
             "HashedControlPassword 16:872860B76453A77D60CA2BB8C1A7042072093276A3D701AD684053EC4C",
@@ -22,14 +20,17 @@ class ConfigManager:
             f"DataDirectory /var/lib/tor/data_{instance_id}",
             "GeoIPFile /usr/share/tor/geoip",
             "GeoIPv6File /usr/share/tor/geoip6",
-            "Log notice stdout",
-            "NewCircuitPeriod 30",
-            "MaxCircuitDirtiness 300",
+            "NewCircuitPeriod 10",
+            "MaxCircuitDirtiness 60",
             "UseEntryGuards 0",
             "LearnCircuitBuildTimeout 1",
             "ExitRelay 0",
             "RefuseUnknownExits 0",
-            "ClientOnly 1"
+            "ClientOnly 1",
+            "UseMicrodescriptors 1",
+            "Log notice stdout",
+            "SafeLogging 1",
+            "MaxClientCircuitsPending 16",
         ]
 
         if subnet:
