@@ -15,7 +15,7 @@ sudo apt install -y python3 python3-pip python3-venv tor socat haproxy
 # Install Python packages
 echo "Installing Python dependencies..."
 if [ -f "src/requirements.txt" ]; then
-    pip3 install --user -r src/requirements.txt
+    pip3 install --user -r src/requirements.txt --break-system-packages
 else
     echo "Warning: src/requirements.txt not found, skipping Python package installation"
 fi
