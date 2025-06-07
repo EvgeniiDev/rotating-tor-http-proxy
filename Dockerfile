@@ -27,7 +27,6 @@ RUN mv /haproxy.cfg /etc/haproxy/haproxy.cfg.default && \
     # Create the server state file for HAProxy
     touch /var/local/haproxy/server-state && \
     chown proxy: /var/local/haproxy/server-state && \
-    touch /etc/tor/torrc && \
     chown -R proxy: /etc/tor/ && \
     mkdir -p /var/local/tor && \
     chown -R proxy: /var/local/tor && \

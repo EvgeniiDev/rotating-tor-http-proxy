@@ -13,7 +13,7 @@ function log() {
 
 # Start admin panel in background
 log "Starting Tor Network Admin Panel..."
-python3 /admin_panel.py &
+python3 admin_panel.py &
 ADMIN_PANEL_PID=$!
 
 # Function to handle shutdown
