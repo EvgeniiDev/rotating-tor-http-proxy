@@ -1,5 +1,4 @@
 global
-  log stdout format raw local0 info
   pidfile /var/local/haproxy/haproxy.pid
   maxconn 4096
   user proxy
@@ -7,11 +6,9 @@ global
   stats timeout 2m
   # Enable runtime server management
   server-state-file /var/local/haproxy/server-state
-  log-tag haproxy
 
 defaults
   mode tcp
-  log global
   option dontlognull
   option tcplog
   option log-health-checks
@@ -29,7 +26,6 @@ defaults
 listen stats
   bind 0.0.0.0:4444
   mode http
-  log global
   option httplog
   maxconn 30
   timeout client 100s
@@ -47,8 +43,6 @@ listen stats
 frontend socks5_proxy
   bind 0.0.0.0:1080
   mode tcp
-  log global
-  option tcplog
   default_backend tor_socks5
 
 backend tor_socks5
