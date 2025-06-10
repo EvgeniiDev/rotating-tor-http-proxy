@@ -1,6 +1,6 @@
 global
   pidfile /var/local/haproxy/haproxy.pid
-  maxconn 4096
+  maxconn 8192
   user proxy
   stats socket /var/local/haproxy/haproxy.sock mode 666 level admin
   stats timeout 2m
@@ -19,8 +19,7 @@ defaults
   timeout client 2m
   timeout server 2m
   timeout check 30s
-  maxconn 4096
-  # Load server state for persistence across reloads
+  maxconn 8192
   load-server-state-from-file global
 
 listen stats
@@ -43,6 +42,7 @@ listen stats
 frontend socks5_proxy
   bind 0.0.0.0:1080
   mode tcp
+  maxconn 8192
   default_backend tor_socks5
 
 backend tor_socks5
