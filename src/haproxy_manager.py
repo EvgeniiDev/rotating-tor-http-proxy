@@ -11,7 +11,8 @@ class HAProxyManager:
     def __init__(self, config_path: str = '/etc/haproxy/haproxy.cfg'):
         self.config_path = config_path
         self.socket_path = '/var/local/haproxy/haproxy.sock'
-        self.base_http_port = 10000
+        self.base_socks_port = 10000  # SOCKS порты 10000-19999
+        self.base_http_port = 20000   # HTTP порты 20000-29999 (SOCKS + 10000)
 
     def is_running(self) -> bool:
         if not os.path.exists(self.socket_path):
@@ -78,7 +79,7 @@ class HAProxyManager:
             # Важно! После добавления сервер находится в состоянии MAINT
             # Нужно явно включить его
             logger.info(f"Попытка включить сервер {server_name}...")
-            time.sleep(1)  # Небольшая задержка для обновления конфигурации
+            time.sleep(1)
             if self.enable_server(backend, server_name):
                 logger.info(f"Сервер {server_name} успешно включен")
                 return True
@@ -105,14 +106,13 @@ class HAProxyManager:
     def remove_backend_instance(self, instance_id: int) -> bool:
         server_name = f"tor{instance_id}"
         return self.remove_server("tor_http_tunnel", server_name)
-
     def _extract_port(self, server_name: str, server_info: Dict) -> int:
         for field in ['addr', 'address', 'addr:port']:
             if field in server_info and ':' in server_info[field]:
                 return int(server_info[field].rsplit(':', 1)[1])
 
         instance_id = int(server_name.replace('tor', ''))
-        return instance_id + self.base_http_port
+        return self.base_http_port + instance_id - 1
 
     def get_server_info(self, backend: str, server_name: str) -> Dict:
         command = f"show servers state {backend}"

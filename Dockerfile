@@ -4,7 +4,8 @@ EXPOSE 8080/tcp 4444/tcp 5000/tcp
 
 # Install system packages in separate layer for better caching
 # Fix HAProxy version to 3.0 for consistent command compatibility and modern features
-RUN apk --no-cache --no-progress --quiet add tor socat haproxy~=3.0
+# Add Privoxy for SOCKS to HTTP conversion
+RUN apk --no-cache --no-progress --quiet add tor socat haproxy~=3.0 privoxy
 
 COPY src/requirements.txt ./
 RUN pip3 install --no-cache-dir -r requirements.txt
@@ -35,6 +36,11 @@ RUN cp /haproxy.cfg /etc/haproxy/haproxy.cfg && \
     chown -R proxy: /var/log/tor && \
     mkdir -p /var/run/tor && \
     chown -R proxy: /var/run/tor && \
+    # Create directories for Privoxy configurations
+    mkdir -p /tmp/privoxy_configs && \
+    chown -R proxy: /tmp/privoxy_configs && \
+    mkdir -p /var/log/privoxy && \
+    chown -R proxy: /var/log/privoxy && \
     # Create a writable tmp directory for the proxy user
     mkdir -p /home/proxy/tmp && \
     chown -R proxy: /home/proxy/tmp
