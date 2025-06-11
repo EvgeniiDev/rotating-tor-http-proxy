@@ -103,7 +103,7 @@ class TorNetworkManager:
         self.services_started = True
         self.stats['tor_instances'] = 0
         self.update_running_instances_count()
-        
+
         logger.info("Services infrastructure initialized successfully.")
         return True
 
@@ -283,7 +283,6 @@ class TorNetworkManager:
                     if not self.monitoring:
                         break
                     time.sleep(1)
-
         monitor_thread = threading.Thread(target=monitor)
         monitor_thread.daemon = True
         monitor_thread.start()
@@ -308,12 +307,13 @@ class TorNetworkManager:
             text=True
         )
 
-        socks_port = tor_config_result['socks_port']
-        
+        http_port = tor_config_result['http_port']
+
         if self.haproxy_manager.add_backend_instance_with_check(
-            instance_id, socks_port, max_wait_time=90        ):
+            instance_id, http_port, max_wait_time=90
+        ):
             logger.info(
-                f"Started Tor instance {instance_id} on SOCKS port {socks_port}")
+                f"Started Tor instance {instance_id} on HTTP port {http_port}")
             return process
         else:
             logger.error(
@@ -392,7 +392,7 @@ class TorNetworkManager:
         """Update the count of running instances"""
         running_main = sum(
             1 for p in self.tor_processes.values() if p and p.poll() is None)
-        
+
         # Create a copy to safely iterate in case of concurrent modification
         subnet_processes_copy = dict(self.subnet_tor_processes)
         running_subnet = sum(
@@ -413,7 +413,7 @@ class TorNetworkManager:
         # Create a copy for safe reading without blocking writes
         subnet_key = f"subnet_{subnet.replace('.', '_')}"
         subnet_processes_copy = dict(self.subnet_tor_processes)
-        
+
         if subnet_key in subnet_processes_copy:
             return len([
                 p for p in subnet_processes_copy[subnet_key].values()
