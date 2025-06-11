@@ -5,14 +5,13 @@ logger = logging.getLogger(__name__)
 
 class ConfigManager:
     def __init__(self):
-        self.base_tor_socks_port = 10000
+        self.base_tor_http_port = 10000
         self.base_tor_ctrl_port = 20000
-
-    def get_tor_config(self, instance_id: int, socks_port: int, ctrl_port: int,
-                       subnet: Optional[str] = None) -> str:
+    def get_tor_config(self, instance_id: int, http_port: int, ctrl_port: int,
+        subnet: Optional[str] = None) -> str:
         config_lines = [
             f"# Tor Instance {instance_id}",
-            f"SocksPort 127.0.0.1:{socks_port}",
+            f"HTTPTunnelPort 127.0.0.1:{http_port}",
             f"ControlPort 127.0.0.1:{ctrl_port}",
             "HashedControlPassword 16:872860B76453A77D60CA2BB8C1A7042072093276A3D701AD684053EC4C",
             f"PidFile /var/lib/tor/tor_{instance_id}.pid",
@@ -54,7 +53,7 @@ class ConfigManager:
             Dictionary with port assignments
         """
         return {
-            'socks_port': self.base_tor_socks_port + instance_id - 1,
+            'http_port': self.base_tor_http_port + instance_id - 1,
             'ctrl_port': self.base_tor_ctrl_port + instance_id - 1
         }
 
@@ -72,7 +71,7 @@ class ConfigManager:
         ports = self.get_port_assignment(instance_id)
         config_content = self.get_tor_config(
             instance_id,
-            ports['socks_port'],
+            ports['http_port'],
             ports['ctrl_port'],
             subnet
         )
@@ -84,6 +83,6 @@ class ConfigManager:
         logger.info(f"Created Tor config {config_path}")
         return {
             'config_path': config_path,
-            'socks_port': ports['socks_port'],
+            'http_port': ports['http_port'],
             'ctrl_port': ports['ctrl_port']
         }

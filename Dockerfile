@@ -1,6 +1,6 @@
 FROM python:3.13.3-alpine3.22
 
-EXPOSE 1080/tcp 4444/tcp 5000/tcp
+EXPOSE 8080/tcp 4444/tcp 5000/tcp
 
 # Install system packages in separate layer for better caching
 # Fix HAProxy version to 3.0 for consistent command compatibility and modern features
