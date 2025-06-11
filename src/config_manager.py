@@ -13,6 +13,7 @@ class ConfigManager:
             f"# Tor Instance {instance_id}",
             f"HTTPTunnelPort 127.0.0.1:{http_port}",
             f"ControlPort 127.0.0.1:{ctrl_port}",
+            "SocksPort 0",
             "HashedControlPassword 16:872860B76453A77D60CA2BB8C1A7042072093276A3D701AD684053EC4C",
             f"PidFile /var/lib/tor/tor_{instance_id}.pid",
             "RunAsDaemon 0",
