@@ -10,7 +10,7 @@ sudo apt update
 
 # Install system dependencies
 echo "Installing system dependencies..."
-sudo apt install -y python3 python3-pip tor socat haproxy
+sudo apt install -y python3 python3-pip tor socat haproxy privoxy
 
 # Install Python packages
 echo "Installing Python dependencies..."
@@ -52,6 +52,29 @@ sudo chown proxy:proxy /var/local/haproxy/server-state
 echo "Setting up Tor configuration..."
 sudo touch /etc/tor/torrc
 sudo chown -R proxy:proxy /etc/tor/
+
+# Set up Privoxy configuration
+echo "Setting up Privoxy configuration..."
+# Stop default Privoxy service
+sudo systemctl stop privoxy 2>/dev/null || true
+sudo systemctl disable privoxy 2>/dev/null || true
+
+# Create Privoxy directories with proper permissions
+sudo mkdir -p /etc/privoxy
+sudo mkdir -p /var/log/privoxy
+sudo mkdir -p /var/lib/privoxy
+sudo chown -R proxy:proxy /etc/privoxy
+sudo chown -R proxy:proxy /var/log/privoxy
+sudo chown -R proxy:proxy /var/lib/privoxy
+
+# Copy our Privoxy configuration
+if [ -f "src/privoxy.conf" ]; then
+    sudo cp src/privoxy.conf /etc/privoxy/config
+    sudo chown proxy:proxy /etc/privoxy/config
+    sudo chmod 644 /etc/privoxy/config
+else
+    echo "Warning: src/privoxy.conf not found!"
+fi
 
 # Create proxy user home directory and tmp
 echo "Setting up proxy user directories..."

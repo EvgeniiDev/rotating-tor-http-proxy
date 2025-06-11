@@ -21,9 +21,11 @@ cleanup() {
     log "Shutting down..."
     if [[ -n $ADMIN_PANEL_PID ]]; then
         kill $ADMIN_PANEL_PID 2>/dev/null
-    fi
-    # Kill all tor processes
+    fi    # Kill all tor processes
     pkill -f tor 2>/dev/null
+
+    # Kill all privoxy processes
+    pkill -f privoxy 2>/dev/null
 
     # Stop HAProxy using systemd
     log "Stopping HAProxy..."
@@ -37,7 +39,10 @@ trap cleanup SIGINT SIGTERM
 
 log "Initializing configuration files..."
 
+# Ensure Privoxy is stopped (system service)
+systemctl stop privoxy 2>/dev/null || true
 
+# Start HAProxy
 systemctl start haproxy
 if ! systemctl is-active --quiet haproxy; then
     log "error" "Failed to start HAProxy with systemd"
