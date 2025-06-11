@@ -309,9 +309,7 @@ class TorNetworkManager:
 
         http_port = tor_config_result['http_port']
 
-        if self.haproxy_manager.add_backend_instance_with_check(
-            instance_id, http_port, max_wait_time=90
-        ):
+        if self.haproxy_manager.add_backend_instance(instance_id, http_port):
             logger.info(
                 f"Started Tor instance {instance_id} on HTTP port {http_port}")
             return process
