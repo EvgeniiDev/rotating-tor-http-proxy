@@ -24,7 +24,11 @@ cleanup() {
     fi
     # Kill all tor processes
     pkill -f tor 2>/dev/null
-    pkill -f haproxy 2>/dev/null
+
+    # Stop HAProxy using systemd
+    log "Stopping HAProxy..."
+    systemctl stop haproxy 2>/dev/null || true
+    
     exit 0
 }
 
@@ -33,16 +37,16 @@ trap cleanup SIGINT SIGTERM
 
 log "Initializing configuration files..."
 
-# "reset" the HAProxy config file because it may contain the previous instances information from the previous docker run
-cp /etc/haproxy/haproxy.cfg.default /etc/haproxy/haproxy.cfg
 
-# Start HAProxy with empty backend configuration (will be populated by admin panel)
-log "Starting HAProxy load balancer..."
-haproxy -f /etc/haproxy/haproxy.cfg &
-HAPROXY_PID=$!
+systemctl start haproxy
+if ! systemctl is-active --quiet haproxy; then
+    log "error" "Failed to start HAProxy with systemd"
+    exit 1
+fi
 
 log "Base services started successfully!"
 log "Admin Panel: http://localhost:5000"
+log "HAProxy Stats: http://localhost:4444"
 log "Proxy will be available at: socks5://localhost:1080 (after starting Tor instances through Admin Panel)"
 log "Use the Admin Panel to start and manage Tor instances"
 

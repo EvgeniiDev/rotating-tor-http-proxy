@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class HAProxyManager:
-    def __init__(self, config_path: str = 'haproxy.cfg'):
+    def __init__(self, config_path: str = '/etc/haproxy/haproxy.cfg'):
         self.config_path = config_path
         self.socket_path = '/var/local/haproxy/haproxy.sock'
         self.base_socks_port = 10000

@@ -11,14 +11,13 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 
 COPY src/ ./
 
-RUN mv /haproxy.cfg /etc/haproxy/haproxy.cfg.default && \
+RUN cp /haproxy.cfg /etc/haproxy/haproxy.cfg && \
     chmod +x /start_with_admin.sh && \
     chmod +x /admin_panel.py && \
     #
     # prepare for low-privilege execution
     addgroup proxy && \
     adduser -S -D -u 1000 -G proxy proxy && \
-    touch /etc/haproxy/haproxy.cfg && \
     chown -R proxy: /etc/haproxy/ && \
     mkdir -p /var/lib/haproxy && \
     chown -R proxy: /var/lib/haproxy && \
