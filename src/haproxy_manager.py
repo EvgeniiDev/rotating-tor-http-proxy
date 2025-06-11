@@ -77,9 +77,10 @@ class HAProxyManager:
             logger.info(f"Сервер {server_name} добавлен с health checking")
             # Важно! После добавления сервер находится в состоянии MAINT
             # Нужно явно включить его
+            logger.info(f"Попытка включить сервер {server_name}...")
             time.sleep(1)  # Небольшая задержка для обновления конфигурации
             if self.enable_server(backend, server_name):
-                logger.info(f"Сервер {server_name} включен")
+                logger.info(f"Сервер {server_name} успешно включен")
                 return True
             else:
                 logger.warning(f"Не удалось включить сервер {server_name}")
