@@ -50,21 +50,6 @@
             border-radius: 50%;
             background: #4CAF50;
             margin-left: 8px;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0% {
-                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
-            }
-
-            70% {
-                box-shadow: 0 0 0 8px rgba(76, 175, 80, 0);
-            }
-
-            100% {
-                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
-            }
         }
 
         .stats-grid {
@@ -80,12 +65,7 @@
             padding: 12px;
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.2);
-            transition: transform 0.2s ease;
             text-align: center;
-        }
-
-        .stat-card:hover {
-            transform: translateY(-2px);
         }
 
         .stat-card.free-subnets {
@@ -136,7 +116,6 @@
 
         .status-indicator-small.status-starting {
             background-color: #FF9800;
-            animation: pulse 1.5s infinite;
         }
 
         .status-indicator-small.status-partial {
@@ -182,15 +161,9 @@
             border-radius: 4px;
             cursor: pointer;
             font-weight: bold;
-            transition: all 0.2s ease;
             background: #4CAF50;
             color: white;
             font-size: 0.8rem;
-        }
-
-        .btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
         }
 
         .btn.danger {
@@ -242,7 +215,6 @@
             padding: 6px 8px;
             margin-bottom: 4px;
             border-left: 3px solid transparent;
-            transition: all 0.2s ease;
             font-size: 0.75rem;
         }
 
@@ -284,7 +256,6 @@
             border-radius: 10px;
             cursor: pointer;
             font-weight: bold;
-            transition: all 0.2s ease;
             font-size: 0.65rem;
         }
 
@@ -362,11 +333,6 @@
             color: white;
             cursor: pointer;
             font-size: 0.6rem;
-            transition: all 0.2s ease;
-        }
-
-        .restart-btn-compact:hover {
-            background: #1976D2;
         }
 
         .last-update {
@@ -430,30 +396,6 @@
 
         .notification-info {
             background: #2196F3;
-        }
-
-        @keyframes slideIn {
-            from {
-                transform: translateX(100%);
-                opacity: 0;
-            }
-
-            to {
-                transform: translateX(0);
-                opacity: 1;
-            }
-        }
-
-        @keyframes slideOut {
-            from {
-                transform: translateX(0);
-                opacity: 1;
-            }
-
-            to {
-                transform: translateX(100%);
-                opacity: 0;
-            }
         }
 
         /* Адаптивность для маленьких экранов */
@@ -553,116 +495,64 @@
     <script>        const socket = io();
         let subnetsData = [];
 
-        // Socket event handlers
-        socket.on('connect', function () {
-            console.log('Connected to server');
+        socket.on('connect', () => {
             updateStatus(true);
             showNotification('Connected to server', 'success');
-            // Request subnet data immediately on connection
             refreshData();
         });
 
-        socket.on('disconnect', function () {
-            console.log('Disconnected from server');
+        socket.on('disconnect', () => {
             updateStatus(false);
             showNotification('Connection lost', 'warning');
         });
-        socket.on('subnet_update', function (data) {
-            console.log('Received subnet update', data);
-            if (data && data.stats && data.subnets && Array.isArray(data.subnets)) {
-                // Handle different data structure format
+
+        socket.on('subnet_update', data => {
+            if (data?.stats && data?.subnets && Array.isArray(data.subnets)) {
                 subnetsData = data.subnets;
                 updateStats(data.stats);
                 renderSubnets();
-                console.log('Subnets rendered:', subnetsData.length);
             } else {
-                console.error('Invalid subnet data received:', data);
                 showNotification('Invalid subnet data received', 'error');
             }
         });
 
-        socket.on('subnet_status_update', function (data) {
-            console.log('Received subnet status update', data);
-
-            // Find and update the specific subnet
+        socket.on('subnet_status_update', data => {
             const subnet = subnetsData.find(s => s.subnet === data.subnet);
             if (subnet) {
                 const oldStatus = subnet.status;
                 subnet.status = data.status;
-
                 if (data.instances_count !== undefined) {
                     subnet.running_instances = data.instances_count;
                 }
-
-                // Show notification for status changes
                 if (oldStatus !== data.status) {
                     let message = `Subnet ${data.subnet}: ${getStatusText(data.status)}`;
-                    let type = 'info';
-
-                    if (data.status === 'running') {
-                        type = 'success';
-                        message += ` (${data.instances_count || 1} instances)`;
-                    } else if (data.status === 'error') {
-                        type = 'error';
-                        if (data.error) {
-                            message += ` - ${data.error}`;
-                        }
-                    } else if (data.status === 'starting') {
-                        type = 'info';
-                        message += '...';
-                    }
-
+                    let type = data.status === 'running' ? 'success' :
+                        data.status === 'error' ? 'error' : 'info';
+                    if (data.status === 'running') message += ` (${data.instances_count || 1} instances)`;
+                    if (data.status === 'error' && data.error) message += ` - ${data.error}`;
                     showNotification(message, type);
                 }
-
+                updateStatsFromSubnetsData();
                 renderSubnets();
             }
         });
 
-        socket.on('status_update', function (data) {
-            console.log('Received status update', data);
-            updateServiceStatus(data);
-        });
+        socket.on('status_update', data => updateServiceStatus(data));
 
-        socket.on('tor_stats_update', function (data) {
-            console.log("Received tor_stats_update:", data);
-            document.getElementById('activeInstances').textContent = data.stats.running_instances || 0;
-            document.getElementById('activeSubnets').textContent = data.stats.active_subnets || 0;
-            document.getElementById('blockedSubnets').textContent = data.stats.blocked_subnets || 0;
-            document.getElementById('totalTorInstances').textContent = data.stats.tor_instances || 0;
-        });
-
-        // Add notification system
-        function showNotification(message, type = 'info') {
-            // Create notification element
+        socket.on('tor_stats_update', data => {
+            if (data?.stats) {
+                document.getElementById('activeInstances').textContent = data.stats.running_instances || 0;
+                document.getElementById('activeSubnets').textContent = data.stats.active_subnets || 0;
+                document.getElementById('blockedSubnets').textContent = data.stats.blocked_subnets || 0;
+                document.getElementById('totalTorInstances').textContent = data.stats.tor_instances || 0;
+            }
+        }); function showNotification(message, type = 'info') {
             const notification = document.createElement('div');
             notification.className = `notification notification-${type}`;
             notification.textContent = message;
-            notification.style.animation = 'slideIn 0.3s ease';
-
-            // Add click to dismiss
-            notification.onclick = function () {
-                dismissNotification(notification);
-            };
-
-            // Add to page
+            notification.onclick = () => notification.remove();
             document.body.appendChild(notification);
-
-            // Auto remove after 5 seconds
-            setTimeout(() => {
-                dismissNotification(notification);
-            }, 5000);
-        }
-
-        function dismissNotification(notification) {
-            if (notification.parentNode) {
-                notification.style.animation = 'slideOut 0.3s ease';
-                setTimeout(() => {
-                    if (notification.parentNode) {
-                        notification.parentNode.removeChild(notification);
-                    }
-                }, 300);
-            }
+            setTimeout(() => notification.remove(), 5000);
         }
         function updateStatus(connected) {
             const indicator = document.querySelector('.status-indicator');
@@ -673,7 +563,9 @@
                     indicator.style.background = '#f44336';
                 }
             }
-        } function updateStats(stats) {
+        }
+
+        function updateStats(stats) {
             if (!stats) return;
 
             const totalSubnetsElement = document.getElementById('totalSubnets');
@@ -703,33 +595,25 @@
                     lastUpdateElement.textContent = `Last updated: ${date.toLocaleString()}`;
                 }
             }
-        } function renderSubnets() {
-            console.log('Rendering subnets, data length:', subnetsData ? subnetsData.length : 0);
-            const container = document.getElementById('subnetList');
+        }
 
-            if (!container) {
-                console.error('subnetList container not found');
-                return;
-            }
+        function renderSubnets() {
+            const container = document.getElementById('subnetList');
+            if (!container) return;
 
             if (!subnetsData || subnetsData.length === 0) {
                 container.innerHTML = '<div class="loading">No subnet data available</div>';
                 return;
             }
 
-            try {
-                console.log(`Showing all ${subnetsData.length} subnets`);
+            container.innerHTML = subnetsData.map(subnet => {
+                const statusClass = subnet.status || 'available';
+                const isActive = subnet.status === 'active';
+                const buttonClass = isActive ? 'active' : 'inactive';
+                const buttonText = isActive ? 'Running' : 'Start';
 
-                container.innerHTML = subnetsData.map(subnet => {
-                    const statusClass = subnet.status || 'available';
-                    const statusText = getStatusText(subnet.status);
-                    const isActive = subnet.status === 'active';
-                    const buttonClass = isActive ? 'active' : 'inactive';
-                    const buttonText = isActive ? 'Running' : 'Start';
-
-                    return `
-                <div class="subnet-item ${statusClass}" 
-                     data-subnet="${subnet.subnet}">
+                return `
+                <div class="subnet-item ${statusClass}" data-subnet="${subnet.subnet}">
                     <div class="subnet-header">
                         <span class="subnet-name">
                             <span class="status-indicator-small status-${statusClass}"></span>
@@ -741,7 +625,6 @@
                             ${buttonText}
                         </button>
                     </div>
-                    
                     <div class="subnet-main-row">
                         <div class="subnet-stats-compact">
                             <div class="subnet-stat-compact">
@@ -761,37 +644,25 @@
                                 <span class="label">Updated</span>
                             </div>
                         </div>
-                        
                         <div class="controls-compact">
                             <label>Limit:</label>
                             <input type="number" class="limit-input-compact" 
                                    value="${subnet.limit || 1}" 
                                    min="1" max="${subnet.count || 10}"
                                    onchange="setSubnetLimit('${subnet.subnet}', this.value)">
-                            
-
                             <label>Inst:</label>
                             <input type="number" class="instances-input-compact" 
                                    value="${subnet.running_instances || 1}" 
                                    min="1" max="10"
                                    onchange="setSubnetInstances('${subnet.subnet}', this.value)">
-
-                            ${isActive ?
-                            `<button class="restart-btn-compact" onclick="restartSubnet('${subnet.subnet}')">↻</button>` :
-                            ''}
+                            ${isActive ? `<button class="restart-btn-compact" onclick="restartSubnet('${subnet.subnet}')">↻</button>` : ''}
                         </div>
                     </div>
-                </div>            `;
-                }).join('');
+                </div>`;
+            }).join('');
 
-            } catch (error) {
-                console.error('Error rendering subnets:', error);
-                container.innerHTML = '<div class="loading">Error rendering subnet data</div>';
-            }// Update the button text with inactive subnets count
             updateStartInactiveButton();
-
-            // Update subnet counters
-            updateSubnetCounters();
+            updateStatsFromSubnetsData();
         } function getStatusText(status) {
             switch (status) {
                 case 'active': return 'Active';
@@ -885,11 +756,14 @@
                     },
                     body: JSON.stringify({ instances: 1 })
                 })
-                    .then(response => response.json())
-                    .then(data => {
+                    .then(response => response.json()).then(data => {
                         if (data.success) {
                             successCount++;
                             console.log(`Started subnet ${subnet.subnet}`);
+
+                            // Update subnet data locally
+                            subnet.status = 'active';
+                            subnet.running_instances = 1;
                         } else {
                             errorCount++;
                             console.error(`Failed to start subnet ${subnet.subnet}:`, data.error);
@@ -897,79 +771,52 @@
 
                         // Show final notification when all requests are done
                         if (successCount + errorCount === count) {
+                            // Update stats after all operations complete
+                            updateStatsFromSubnetsData();
+
                             if (errorCount === 0) {
                                 showNotification(`Successfully started ${successCount} subnet(s)`, 'success');
                             } else {
                                 showNotification(`Started ${successCount} subnet(s), ${errorCount} failed`, 'warning');
                             }
                         }
-                    })
-                    .catch(error => {
+                    }).catch(error => {
                         errorCount++;
                         console.error(`Error starting subnet ${subnet.subnet}:`, error);
 
                         // Show final notification when all requests are done
                         if (successCount + errorCount === count) {
+                            // Update stats even if some failed
+                            updateStatsFromSubnetsData();
                             showNotification(`Started ${successCount} subnet(s), ${errorCount} failed`, 'warning');
                         }
                     });
             });
         }
+
         function toggleSubnet(subnet) {
-            console.log(`Toggling subnet: ${subnet}`);
-
-            // Find current subnet status
             const subnetData = subnetsData.find(s => s.subnet === subnet);
-            const isActive = subnetData ? subnetData.status === 'active' : false;
-
-            console.log(`Current status for ${subnet}: ${isActive}`, subnetData);
-
-            // Update UI to show starting state
+            const isActive = subnetData?.status === 'active';
             const button = document.querySelector(`button[onclick="toggleSubnet('${subnet}')"]`);
+
             if (button) {
                 button.disabled = true;
                 button.textContent = isActive ? 'Stopping...' : 'Starting...';
-                button.className = 'subnet-toggle starting';
             }
 
-            // Use correct endpoints based on current status
             const endpoint = isActive ? `/api/subnet/${subnet}/stop` : `/api/subnet/${subnet}/start`;
-            const instances = subnetData ? (subnetData.running_instances || 1) : 1;
+            const instances = subnetData?.running_instances || 1;
 
-            fetch(endpoint, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ instances: instances })
-            })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        const action = isActive ? 'stopped' : 'started';
-                        showNotification(data.message || `Subnet ${subnet} ${action}`, isActive ? 'info' : 'success');
-                        console.log(`Subnet ${subnet} ${action}`);
-
-                        // Update the subnet data
-                        if (subnetData) {
-                            subnetData.status = isActive ? 'available' : 'active';
-                            subnetData.running_instances = isActive ? 0 : instances;
-                        }
-                        // Refresh the subnet list to update UI
-                        setTimeout(() => {
-                            refreshData();
-                        }, 1000);
-                    } else {
-                        showNotification(`Failed to toggle subnet ${subnet}: ${data.error || data.message}`, 'error');
-                        console.error('Toggle error:', data.error || data.message);
+            apiRequest(endpoint, 'POST', { instances }, null, `Failed to toggle subnet ${subnet}`)
+                .then(() => {
+                    if (subnetData) {
+                        subnetData.status = isActive ? 'available' : 'active';
+                        subnetData.running_instances = isActive ? 0 : instances;
                     }
-                })
-                .catch(error => {
-                    console.error('Error toggling subnet:', error);
-                    showNotification(`Error toggling subnet ${subnet}: ${error.message}`, 'error');
+                    updateStatsFromSubnetsData();
+                    setTimeout(refreshData, 1000);
                 })
                 .finally(() => {
-                    // Reset button state
                     if (button) {
                         button.disabled = false;
                         button.className = 'subnet-toggle';
@@ -977,148 +824,95 @@
                 });
         }
 
-        function setSubnetLimit(subnet, limit) {
-            fetch(`/api/subnet/${subnet}/limit`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ limit: parseInt(limit) })
+        function apiRequest(endpoint, method, body, successMsg, errorMsg) {
+            return fetch(endpoint, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: body ? JSON.stringify(body) : undefined
             })
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        showNotification(`Subnet ${subnet} limit to ${data.limit}`, 'info');
-                        console.log(`Subnet ${subnet} limit set to ${data.limit}`);
+                        if (successMsg) showNotification(successMsg, 'success');
+                        return data;
                     } else {
-                        showNotification(`Failed to set limit for ${subnet}: ${data.error}`, 'error');
+                        if (errorMsg) showNotification(`${errorMsg}: ${data.error}`, 'error');
+                        throw new Error(data.error);
                     }
                 })
                 .catch(error => {
-                    console.error('Error setting subnet limit:', error);
-                    showNotification(`Error setting limit for ${subnet}`, 'error');
+                    if (errorMsg) showNotification(errorMsg, 'error');
+                    throw error;
                 });
+        }
+
+        function setSubnetLimit(subnet, limit) {
+            apiRequest(`/api/subnet/${subnet}/limit`, 'POST', { limit: parseInt(limit) },
+                `Subnet ${subnet} limit set to ${limit}`, `Failed to set limit for ${subnet}`);
         }
 
         function setSubnetInstances(subnet, instances) {
-            fetch(`/api/subnet/${subnet}/instances`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ instances: parseInt(instances) })
-            })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        showNotification(`Subnet ${subnet} instances set to ${data.instances}`, 'info');
-                        console.log(`Subnet ${subnet} instances set to ${data.instances}`);
-                    } else {
-                        showNotification(`Failed to set instances for ${subnet}: ${data.error}`, 'error');
-                        console.error('Error setting instances:', data.error);
-                    }
-                })
-                .catch(error => {
-                    console.error('Error setting subnet instances:', error);
-                    showNotification(`Error setting instances for ${subnet}`, 'error');
-                });
+            apiRequest(`/api/subnet/${subnet}/instances`, 'POST', { instances: parseInt(instances) },
+                `Subnet ${subnet} instances set to ${instances}`, `Failed to set instances for ${subnet}`);
         }
+
         function restartSubnet(subnet) {
-            if (confirm(`Are you sure you want to restart instances for subnet ${subnet}?`)) {
-                showNotification(`Restarting subnet ${subnet}...`, 'info');
+            if (!confirm(`Restart instances for subnet ${subnet}?`)) return;
 
-                fetch(`/api/subnet/${subnet}/restart`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ instances: 1 })
-                })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            showNotification(data.message || `Subnet ${subnet} restarted successfully`, 'success');
-                            console.log(`Subnet ${subnet} instances restarted`);
-
-                            // Update subnet data
-                            const subnetData = subnetsData.find(s => s.subnet === subnet);
-                            if (subnetData) {
-                                subnetData.is_active = true;
-                                subnetData.status = 'running';
-                            }
-                            // Refresh the subnet list
-                            setTimeout(() => {
-                                refreshData();
-                            }, 1000);
-                        } else {
-                            showNotification(`Failed to restart ${subnet}: ${data.error}`, 'error');
-                            console.error('Error restarting subnet:', data.error);
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error restarting subnet:', error);
-                        showNotification(`Error restarting ${subnet}`, 'error');
-                    });
-            }
+            apiRequest(`/api/subnet/${subnet}/restart`, 'POST', { instances: 1 },
+                `Subnet ${subnet} restarted successfully`, `Failed to restart ${subnet}`)
+                .then(() => {
+                    const subnetData = subnetsData.find(s => s.subnet === subnet);
+                    if (subnetData) {
+                        subnetData.is_active = true;
+                        subnetData.status = 'running';
+                    }
+                    updateStatsFromSubnetsData();
+                    setTimeout(refreshData, 1000);
+                });
         }
 
         function refreshData() {
-            showNotification('Refreshing subnet data...', 'info');
             fetch('/api/subnets')
                 .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`Server responded with status: ${response.status}`);
-                    }
+                    if (!response.ok) throw new Error(`Server error: ${response.status}`);
                     return response.json();
-                }).then(data => {
-                    if (data && data.success && data.subnets && Array.isArray(data.subnets)) {
-                        console.log(`Received ${data.subnets.length} subnets with success flag`);
+                })
+                .then(data => {
+                    if (data?.subnets && Array.isArray(data.subnets)) {
                         subnetsData = data.subnets;
-                        updateStats(data.stats);
+                        if (data.stats) updateStats(data.stats);
+                        updateStatsFromSubnetsData();
                         renderSubnets();
-                        showNotification(`Successfully loaded ${data.subnets.length} subnets`, 'success');
-                    } else if (data && data.subnets && Array.isArray(data.subnets)) {
-                        // Handle legacy data structure format
-                        console.log(`Received ${data.subnets.length} subnets (legacy format)`);
-                        subnetsData = data.subnets;
-                        updateStats(data.stats);
-                        renderSubnets();
-                        showNotification(`Successfully loaded ${data.subnets.length} subnets`, 'success');
+                        showNotification(`Loaded ${data.subnets.length} subnets`, 'success');
                     } else {
-                        console.error('Invalid data structure received:', data);
-                        showNotification(`Error: ${data.error || 'Invalid data received'}`, 'error');
+                        showNotification(`Error: ${data.error || 'Invalid data'}`, 'error');
                     }
                 })
-                .catch(error => {
-                    console.error('Error refreshing data:', error);
-                    showNotification('Failed to refresh data: ' + error.message, 'error');
-                });
-        } function updateSubnetCounters() {
+                .catch(error => showNotification('Failed to refresh data', 'error'));
+        } function updateStatsFromSubnetsData() {
             if (!subnetsData || !Array.isArray(subnetsData)) return;
 
             const totalSubnets = subnetsData.length;
-            const inactiveSubnets = subnetsData.filter(subnet =>
-                subnet.status !== 'active' && subnet.status !== 'starting'
+            const activeSubnets = subnetsData.filter(subnet =>
+                subnet.status === 'active' || subnet.status === 'running' ||
+                (subnet.running_instances && subnet.running_instances > 0)
+            ).length;
+            const freeSubnets = subnetsData.filter(subnet =>
+                (!subnet.running_instances || subnet.running_instances === 0) &&
+                subnet.status !== 'starting' && subnet.status !== 'blocked'
             ).length;
 
-            // Update the counter elements
-            const totalElement = document.getElementById('totalSubnets');
-            const inactiveElement = document.getElementById('inactiveSubnets');
-
-            if (totalElement) {
-                totalElement.textContent = totalSubnets;
-            }
-            if (inactiveElement) {
-                inactiveElement.textContent = inactiveSubnets;
-            }
-
-            console.log(`Subnet counters updated: Total=${totalSubnets}, Inactive=${inactiveSubnets}`);
+            document.getElementById('totalSubnets').textContent = totalSubnets;
+            document.getElementById('activeSubnets').textContent = activeSubnets;
+            document.getElementById('freeSubnets').textContent = freeSubnets;
+            document.getElementById('inactiveSubnets').textContent = totalSubnets - activeSubnets;
+            document.getElementById('lastUpdate').textContent = `Last updated: ${new Date().toLocaleString()}`;
         }
 
         function filterSubnets() {
             const search = document.getElementById('searchInput').value.toLowerCase();
             const items = document.querySelectorAll('.subnet-item');
-
             let visibleCount = 0;
             items.forEach(item => {
                 const subnet = item.dataset.subnet;
@@ -1128,41 +922,26 @@
                 } else {
                     item.style.display = 'none';
                 }
-            }); if (search && visibleCount === 0) {
+            });
+            if (search && visibleCount === 0) {
                 showNotification(`No subnets found matching "${search}"`, 'info');
             }
         }
 
-        // Service management functions
-
-        // Initial data load (only on page load, Socket.IO will handle updates)
         document.addEventListener('DOMContentLoaded', function () {
             refreshData();
-
-            // Add event listener for subnet count select
             const subnetCountSelect = document.getElementById('subnetCountSelect');
             const customInput = document.getElementById('customSubnetCount');
-
             if (subnetCountSelect && customInput) {
                 subnetCountSelect.addEventListener('change', function () {
-                    if (this.value === 'custom') {
-                        customInput.style.display = 'inline-block';
-                        customInput.focus();
-                    } else {
-                        customInput.style.display = 'none';
-                    }
+                    customInput.style.display = this.value === 'custom' ? 'inline-block' : 'none';
+                    if (this.value === 'custom') customInput.focus();
                 });
             }
         });
 
-        // Handle Socket.IO errors
-        socket.on('error', function (error) {
-            console.error('Socket.IO error:', error);
-            showNotification('Server error: ' + (error.message || 'Unknown error'), 'error');
-        }); socket.on('connect_error', function (error) {
-            console.error('Socket.IO connection error:', error);
-            showNotification('Connection error: ' + error.message, 'error');
-        });
+        socket.on('error', error => showNotification('Server error', 'error'));
+        socket.on('connect_error', error => showNotification('Connection error', 'error'));
     </script>
 </body>
 
