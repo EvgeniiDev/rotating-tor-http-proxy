@@ -10,7 +10,7 @@ sudo apt update
 
 # Install system dependencies
 echo "Installing system dependencies..."
-sudo apt install -y python3 python3-pip python3-venv tor socat haproxy
+sudo apt install -y python3 python3-pip tor socat haproxy
 
 # Install Python packages
 echo "Installing Python dependencies..."
