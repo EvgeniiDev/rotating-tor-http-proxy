@@ -32,8 +32,14 @@ fi
 
 # Set up HAProxy configuration
 echo "Setting up HAProxy configuration..."
-sudo cp /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg.default || true
-sudo touch /etc/haproxy/haproxy.cfg
+# Remove default HAProxy config and copy our config
+sudo rm -f /etc/haproxy/haproxy.cfg
+if [ -f "src/haproxy.cfg" ]; then
+    sudo cp src/haproxy.cfg /etc/haproxy/haproxy.cfg
+else
+    echo "Error: src/haproxy.cfg not found!"
+    exit 1
+fi
 sudo chown proxy:proxy /etc/haproxy/haproxy.cfg
 sudo mkdir -p /var/lib/haproxy
 sudo chown -R proxy:proxy /var/lib/haproxy
@@ -46,14 +52,6 @@ sudo chown proxy:proxy /var/local/haproxy/server-state
 echo "Setting up Tor configuration..."
 sudo touch /etc/tor/torrc
 sudo chown -R proxy:proxy /etc/tor/
-sudo mkdir -p /var/local/tor
-sudo chown -R proxy:proxy /var/local/tor
-sudo mkdir -p /var/lib/tor
-sudo chown -R proxy:proxy /var/lib/tor
-sudo mkdir -p /var/log/tor
-sudo chown -R proxy:proxy /var/log/tor
-sudo mkdir -p /var/run/tor
-sudo chown -R proxy:proxy /var/run/tor
 
 # Create proxy user home directory and tmp
 echo "Setting up proxy user directories..."
@@ -70,11 +68,7 @@ if [ -f "src/admin_panel.py" ]; then
     chmod +x src/admin_panel.py
 fi
 
-# Copy HAProxy config if exists
-if [ -f "src/haproxy.cfg" ]; then
-    sudo cp src/haproxy.cfg /etc/haproxy/haproxy.cfg.default
-fi
-
+# Script installation completed
 echo "Installation completed successfully!"
 echo ""
 echo "To run the application:"
