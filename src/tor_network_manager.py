@@ -5,8 +5,10 @@ import subprocess
 import requests
 from datetime import datetime
 from collections import defaultdict
+from typing import Optional
 
 from haproxy_manager import HAProxyManager
+from privoxy_manager import PrivoxyManager
 from config_manager import ConfigManager
 from models import ServiceStatus, get_current_timestamp
 
@@ -24,6 +26,7 @@ class TorNetworkManager:
         self.tor_processes = {}
         self.subnet_tor_processes = {}
         self.haproxy_manager = HAProxyManager()
+        self.privoxy_manager = PrivoxyManager()
         self.config_manager = ConfigManager()
         self.next_instance_id = 1
         self.socketio = socketio
@@ -100,6 +103,11 @@ class TorNetworkManager:
 
         logger.info("Initializing services infrastructure...")
 
+        # Запуск Privoxy
+        if not self.privoxy_manager.start_privoxy():
+            logger.error("Failed to start Privoxy")
+            return False
+
         self.services_started = True
         self.stats['tor_instances'] = 0
         self.update_running_instances_count()
@@ -124,6 +132,10 @@ class TorNetworkManager:
             self.tor_processes.clear()
             self.subnet_tor_processes.clear()
             self.active_subnets.clear()
+            
+            # Остановка Privoxy
+            self.privoxy_manager.stop_privoxy()
+            
             self.services_started = False
             self.update_running_instances_count()
             logger.info("All services stopped")
@@ -385,7 +397,6 @@ class TorNetworkManager:
             self._stop_subnet_tor_internal(subnet)
             time.sleep(2)
             return self._start_subnet_tor_internal(subnet, instances_count)
-
     def update_running_instances_count(self):
         """Update the count of running instances"""
         running_main = sum(
@@ -418,3 +429,11 @@ class TorNetworkManager:
                 if p and p.poll() is None
             ])
         return 0
+
+    def get_http_port(self, instance_id: int) -> Optional[int]:
+        """Получение HTTP порта для экземпляра через Privoxy"""
+        return self.privoxy_manager.get_http_port(instance_id)
+    
+    def get_socks_port(self, instance_id: int) -> Optional[int]:
+        """Получение SOCKS порта для экземпляра"""
+        return self.privoxy_manager.get_socks_port(instance_id)
