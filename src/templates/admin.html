@@ -781,26 +781,7 @@
         <div id="balancer" class="tab-content active">
             <div class="balancer-stats">                <div class="balancer-header">
                     <h3>HTTP Load Balancer Status</h3>
-                    <div>
-                        <button class="btn btn-primary" onclick="startBalancer()">▶️ Запустить</button>
-                        <button class="btn btn-danger" onclick="stopBalancer()">⏹️ Остановить</button>
-                        <button class="btn btn-secondary" onclick="clearBalancerStats()">🗑️ Очистить статистику</button>
-                        <button class="btn btn-info" onclick="refreshBalancerData()">🔄 Обновить</button>
-                    </div>
-                </div>
-
-                <!-- Глобальное управление всеми сервисами -->
-                <div class="global-controls" style="margin-bottom: 20px; padding: 15px; background: rgba(255, 255, 255, 0.1); border-radius: 8px;">
-                    <h4 style="margin-bottom: 10px;">Управление всеми сервисами</h4>
-                    <div class="controls">
-                        <button class="btn btn-primary" onclick="startAllServices()">🚀 Запустить все</button>
-                        <button class="btn btn-danger" onclick="stopAllServices()">⏹️ Остановить все</button>
-                        <button class="btn btn-warning" onclick="restartAllServices()">🔄 Перезапустить все</button>
-                        <button class="btn btn-secondary" onclick="refreshAllData()">🔄 Обновить данные</button>
-                    </div>
-                </div>
-
-                <!-- Основная статистика -->
+                </div>                <!-- Основная статистика -->
                 <div class="stats-grid">
                     <div class="stat-card balancer">
                         <span class="stat-number" id="balancerStatus">Неизвестно</span>
@@ -992,11 +973,7 @@
 
             setTimeout(() => {
                 document.body.removeChild(notification);
-            }, 3000);
-        }        function refreshAllData() {
-            refreshSubnets();
-            refreshBalancerData();
-        }function refreshSubnets() {
+            }, 3000);        }function refreshSubnets() {
             fetch('/api/subnets')
                 .then(response => response.json())
                 .then(data => {
@@ -1309,128 +1286,6 @@
             if (diff < 3600) return `${Math.floor(diff / 60)}m назад`;
             if (diff < 86400) return `${Math.floor(diff / 3600)}h назад`;
             return `${Math.floor(diff / 86400)}d назад`;
-        }
-
-        function startBalancer() {
-            fetch('/api/balancer/start', { method: 'POST' })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        showNotification('HTTP балансировщик запущен', 'success');
-                        refreshBalancerData();
-                    } else {
-                        showNotification(data.message || 'Ошибка запуска', 'error');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error starting balancer:', error);
-                    showNotification('Ошибка запуска балансировщика', 'error');
-                });
-        }
-
-        function stopBalancer() {
-            fetch('/api/balancer/stop', { method: 'POST' })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        showNotification('HTTP балансировщик остановлен', 'success');
-                        refreshBalancerData();
-                    } else {
-                        showNotification(data.message || 'Ошибка остановки', 'error');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error stopping balancer:', error);
-                    showNotification('Ошибка остановки балансировщика', 'error');
-                });
-        }
-
-        function clearBalancerStats() {
-            if (confirm('Вы уверены, что хотите очистить всю статистику балансировщика?')) {                fetch('/api/balancer/clear-stats', { method: 'POST' })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            showNotification('Статистика очищена', 'success');
-                            refreshBalancerData();
-                        } else {
-                            showNotification(data.message || 'Ошибка очистки', 'error');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error clearing stats:', error);
-                        showNotification('Ошибка очистки статистики', 'error');
-                    });
-            }        }
-
-        // Функции управления всеми сервисами
-        function startAllServices() {
-            fetch('/api/services/start', { method: 'POST' })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        showNotification('Все сервисы запущены', 'success');
-                        refreshAllData();
-                    } else {
-                        showNotification(data.message || 'Ошибка запуска сервисов', 'error');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error starting all services:', error);
-                    showNotification('Ошибка запуска всех сервисов', 'error');
-                });
-        }
-
-        function stopAllServices() {
-            fetch('/api/services/stop', { method: 'POST' })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        showNotification('Все сервисы остановлены', 'success');
-                        refreshAllData();
-                    } else {
-                        showNotification(data.message || 'Ошибка остановки сервисов', 'error');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error stopping all services:', error);
-                    showNotification('Ошибка остановки всех сервисов', 'error');
-                });
-        }
-
-        function restartAllServices() {
-            showNotification('Перезапуск всех сервисов...', 'info');
-            
-            // Сначала останавливаем все сервисы
-            fetch('/api/services/stop', { method: 'POST' })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        // Ждем немного перед запуском
-                        setTimeout(() => {
-                            // Запускаем все сервисы
-                            fetch('/api/services/start', { method: 'POST' })
-                                .then(response => response.json())
-                                .then(data => {
-                                    if (data.success) {
-                                        showNotification('Все сервисы перезапущены', 'success');
-                                        refreshAllData();
-                                    } else {
-                                        showNotification(data.message || 'Ошибка запуска после перезапуска', 'error');
-                                    }
-                                })
-                                .catch(error => {
-                                    console.error('Error restarting services (start phase):', error);
-                                    showNotification('Ошибка запуска при перезапуске', 'error');
-                                });
-                        }, 2000); // Ждем 2 секунды
-                    } else {
-                        showNotification(data.message || 'Ошибка остановки при перезапуске', 'error');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error restarting services (stop phase):', error);
-                    showNotification('Ошибка остановки при перезапуске', 'error');
-                });
         }        // Функция обновления статистики подсетей
         function updateSubnetStats() {
             // Статистика подсетей
