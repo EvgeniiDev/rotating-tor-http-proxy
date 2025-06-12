@@ -11,8 +11,8 @@ function log() {
     echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") [controller] [${level}] ${msg}"
 }
 
-# Start admin panel in background
-log "Starting Tor Network Admin Panel..."
+# Start admin panel with HTTP balancer in background
+log "Starting Tor HTTP Proxy Admin Panel with integrated load balancer..."
 python3 admin_panel.py &
 ADMIN_PANEL_PID=$!
 
@@ -21,42 +21,31 @@ cleanup() {
     log "Shutting down..."
     if [[ -n $ADMIN_PANEL_PID ]]; then
         kill $ADMIN_PANEL_PID 2>/dev/null
-    fi    # Kill all tor processes
-    pkill -f tor 2>/dev/null
-
-    # Kill all privoxy processes
-    pkill -f privoxy 2>/dev/null
-
-    # Stop HAProxy using systemd
-    log "Stopping HAProxy..."
-    systemctl stop haproxy 2>/dev/null || true
+    fi
     
+    # Kill all tor processes
+    pkill -f tor 2>/dev/null
+    
+    log "All services stopped"
     exit 0
 }
 
 # Set up signal handlers
 trap cleanup SIGINT SIGTERM
 
-log "Initializing configuration files..."
+log "Initializing HTTP Load Balancer configuration..."
 
-# Ensure Privoxy is stopped (system service)
-systemctl stop privoxy 2>/dev/null || true
+# Create necessary directories for Tor
+mkdir -p /var/lib/tor/data
+chmod 755 /var/lib/tor/data
 
-# Start HAProxy
-systemctl start haproxy
-if ! systemctl is-active --quiet haproxy; then
-    log "error" "Failed to start HAProxy with systemd"
-    exit 1
-fi
+# Create /etc/tor directory if it doesn't exist
+mkdir -p /etc/tor
+chmod 755 /etc/tor
 
-log "Base services started successfully!"
-log "Admin Panel: http://localhost:5000"
-log "HAProxy Stats: http://localhost:4444"
-log "Proxy will be available at: socks5://localhost:1080 (after starting Tor instances through Admin Panel)"
-log "Use the Admin Panel to start and manage Tor instances"
+log "HTTP Load Balancer started successfully"
+log "Admin panel available at http://localhost:5000"
+log "HTTP proxy available at http://localhost:8080"
 
-# Wait for admin panel or any process to exit
-wait
-
-# Cleanup on exit
-cleanup
+# Wait for admin panel to finish
+wait $ADMIN_PANEL_PID
