@@ -154,10 +154,14 @@
         .btn-danger {
             background: #f44336;
             color: white;
-        }        .btn-warning {
+        }
+
+        .btn-warning {
             background: #FF9800;
             color: white;
-        }        .btn-info {
+        }
+
+        .btn-info {
             background: #2196F3;
             color: white;
         }
@@ -577,10 +581,12 @@
                 transform: translateX(100%);
                 opacity: 0;
             }
+
             to {
                 transform: translateX(0);
                 opacity: 1;
-            }        }
+            }
+        }
 
         /* Стили для подсетей */
         .subnet-grid {
@@ -602,7 +608,9 @@
         .subnet-card:hover {
             transform: translateY(-2px);
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-        }        .subnet-header {
+        }
+
+        .subnet-header {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
@@ -705,7 +713,9 @@
 
         .search-bar::placeholder {
             color: rgba(255, 255, 255, 0.7);
-        }        .search-bar:focus {
+        }
+
+        .search-bar:focus {
             outline: none;
             border-color: #2196F3;
             box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.3);
@@ -733,7 +743,9 @@
         .subnet-card.selected {
             border: 2px solid #2196F3;
             box-shadow: 0 0 10px rgba(33, 150, 243, 0.5);
-        }        .subnet-cidr {
+        }
+
+        .subnet-cidr {
             font-family: monospace;
             font-size: 0.9rem;
             color: #4CAF50;
@@ -756,12 +768,12 @@
             .proxy-stats-grid {
                 grid-template-columns: 1fr;
             }
-            
+
             .modal-content {
                 width: 95%;
                 margin: 10% auto;
             }
-            
+
             .modal-body .stats-grid {
                 grid-template-columns: 1fr;
             }
@@ -774,14 +786,16 @@
         <div class="header">
             <h1>Tor HTTP Proxy Admin Panel <span class="status-indicator" id="connectionStatus"></span></h1>
             <p>Управление Tor сетью и HTTP балансировщиком</p>
-        </div>        <div class="tabs">
+        </div>
+        <div class="tabs">
             <button class="tab active" onclick="switchTab('balancer')">HTTP Балансировщик</button>
             <button class="tab" onclick="switchTab('subnets')">Подсети</button>
-        </div>        <!-- Balancer Tab -->
+        </div> <!-- Balancer Tab -->
         <div id="balancer" class="tab-content active">
-            <div class="balancer-stats">                <div class="balancer-header">
+            <div class="balancer-stats">
+                <div class="balancer-header">
                     <h3>HTTP Load Balancer Status</h3>
-                </div>                <!-- Основная статистика -->
+                </div> <!-- Основная статистика -->
                 <div class="stats-grid">
                     <div class="stat-card balancer">
                         <span class="stat-number" id="balancerStatus">Неизвестно</span>
@@ -794,7 +808,8 @@
                     <div class="stat-card success">
                         <span class="stat-number" id="totalProxies">0</span>
                         <span class="stat-label">Всего прокси</span>
-                    </div>                    <div class="stat-card success">
+                    </div>
+                    <div class="stat-card success">
                         <span class="stat-number" id="availableProxies">0</span>
                         <span class="stat-label">Доступных</span>
                     </div>
@@ -851,7 +866,7 @@
                     </div>
                 </div>
             </div>
-        </div>        <!-- Subnets Tab -->
+        </div> <!-- Subnets Tab -->
         <div id="subnets" class="tab-content">
             <!-- Статистика подсетей -->
             <div class="subnets-stats" style="margin-bottom: 20px;">
@@ -872,62 +887,44 @@
                 </div>
             </div>
 
-            <!-- Глобальное управление всеми сервисами -->
-            <div class="global-controls" style="margin-bottom: 20px; padding: 15px; background: rgba(255, 255, 255, 0.1); border-radius: 8px;">
-                <h4 style="margin-bottom: 10px;">Управление всеми сервисами</h4>
-                <div class="controls">
-                    <button class="btn btn-primary" onclick="startAllServices()">🚀 Запустить все</button>
-                    <button class="btn btn-danger" onclick="stopAllServices()">⏹️ Остановить все</button>
-                    <button class="btn btn-warning" onclick="restartAllServices()">🔄 Перезапустить все</button>
-                    <button class="btn btn-secondary" onclick="refreshAllData()">🔄 Обновить данные</button>
-                </div>
-            </div>
-
-            <input type="text" class="search-bar" id="searchInput" placeholder="Поиск подсетей..." onkeyup="filterSubnets()">
-            
             <div class="controls">
-                <button class="btn btn-secondary" onclick="refreshSubnets()">🔄 Обновить подсети</button>
-                <button class="btn btn-info" onclick="toggleAllSubnets()">☑️ Выбрать все</button>
-                
-                <!-- Информационная панель -->
-                <div class="selection-info" id="selectionInfo" style="display: none;">
-                    <span id="selectedCount">0</span> подсетей выбрано
-                    (<span id="selectedRelays">0</span> релеев)
-                </div>
-                
-                <div class="bulk-controls">
-                    <label for="subnetCountSelect">Количество инстансов:</label>
-                    <select id="subnetCountSelect" onchange="handleSubnetCountChange()" style="padding: 8px; border-radius: 4px;">
-                        <option value="1">1 инстанс</option>
-                        <option value="2">2 инстанса</option>
-                        <option value="3">3 инстанса</option>
-                        <option value="5">5 инстансов</option>
-                        <option value="custom">Свое количество</option>
-                    </select>
-                    <input type="number" id="customSubnetCount" min="1" max="10" value="1" style="display: none; padding: 8px; border-radius: 4px; width: 80px;">
-                    
-                    <label for="subnetLimitSelect" style="margin-left: 15px;">Запустить подсетей:</label>
-                    <select id="subnetLimitSelect" onchange="handleSubnetLimitChange()" style="padding: 8px; border-radius: 4px;">
-                        <option value="all">Все выбранные</option>
-                        <option value="5">Первые 5</option>
-                        <option value="10">Первые 10</option>
-                        <option value="20">Первые 20</option>
-                        <option value="50">Первые 50</option>
-                        <option value="custom-limit">Свое количество</option>
-                    </select>
-                    <input type="number" id="customSubnetLimit" min="1" max="1000" value="10" style="display: none; padding: 8px; border-radius: 4px; width: 80px;" placeholder="Кол-во">
-                      <button class="btn btn-primary" onclick="startSelectedSubnets()">🚀 Запустить выбранные</button>
-                    <button class="btn btn-success" onclick="startTopSubnets()">⭐ Запустить топ подсетей</button>
-                    <button class="btn btn-danger" onclick="stopAllSubnets()">⏹️ Остановить все</button>
-                    <button class="btn btn-warning" onclick="restartAllSubnets()">🔄 Перезапустить все</button>
-                </div>
-            </div>
+                <label for="subnetCountSelect">Количество инстансов:</label>
+                <select id="subnetCountSelect" onchange="handleSubnetCountChange()"
+                    style="padding: 8px; border-radius: 4px;">
+                    <option value="1">1 инстанс</option>
+                    <option value="2">2 инстанса</option>
+                    <option value="3">3 инстанса</option>
+                    <option value="5">5 инстансов</option>
+                    <option value="custom">Свое количество</option>
+                </select>
+                <input type="number" id="customSubnetCount" min="1" max="10" value="1"
+                    style="display: none; padding: 8px; border-radius: 4px; width: 80px;">
 
-            <div class="subnet-grid" id="subnetContainer">
-                <!-- Subnet items will be populated here -->
+                <label for="subnetLimitSelect" style="margin-left: 15px;">Запустить подсетей:</label>
+                <select id="subnetLimitSelect" onchange="handleSubnetLimitChange()"
+                    style="padding: 8px; border-radius: 4px;">
+                    <option value="all">Все выбранные</option>
+                    <option value="5">Первые 5</option>
+                    <option value="10">Первые 10</option>
+                    <option value="20">Первые 20</option>
+                    <option value="50">Первые 50</option>
+                    <option value="custom-limit">Свое количество</option>
+                </select>
+                <input type="number" id="customSubnetLimit" min="1" max="1000" value="10"
+                    style="display: none; padding: 8px; border-radius: 4px; width: 80px;" placeholder="Кол-во">
+                <button class="btn btn-primary" onclick="startSelectedSubnets()">🚀 Запустить выбранные</button>
+                <button class="btn btn-success" onclick="startTopSubnets()">⭐ Запустить топ подсетей</button>
+                <button class="btn btn-danger" onclick="stopAllSubnets()">⏹️ Остановить все</button>
+                <button class="btn btn-warning" onclick="restartAllSubnets()">🔄 Перезапустить все</button>
             </div>
         </div>
-    </div>    <script>
+
+        <div class="subnet-grid" id="subnetContainer">
+            <!-- Subnet items will be populated here -->
+        </div>
+    </div>
+    </div>
+    <script>
         const socket = io();
         let subnetsData = [];
         let balancerData = {};
@@ -943,7 +940,7 @@
         }
 
         // Call initialization immediately
-        initializeData();        function switchTab(tabName) {
+        initializeData(); function switchTab(tabName) {
             // Hide all tab contents
             document.querySelectorAll('.tab-content').forEach(content => {
                 content.classList.remove('active');
@@ -973,7 +970,8 @@
 
             setTimeout(() => {
                 document.body.removeChild(notification);
-            }, 3000);        }function refreshSubnets() {
+            }, 3000);
+        } function refreshSubnets() {
             fetch('/api/subnets')
                 .then(response => response.json())
                 .then(data => {
@@ -989,31 +987,33 @@
                         } else {
                             console.warn('Subnets data is not an array:', data.subnets);
                             subnetsData = [];
-                        }
-                          renderSubnets();
+                        } renderSubnets();
                         updateSubnetStats();
-                        showNotification(`Загружено ${subnetsData.length} подсетей`, 'success');
+                        // Убираем уведомление при автоматическом обновлении
                     } else {
-                        showNotification(`Ошибка: ${data.error || 'Неизвестная ошибка'}`, 'error');
+                        console.error('Failed to refresh subnets:', data.error || 'Unknown error');
                         subnetsData = [];
                     }
                 })
                 .catch(error => {
                     console.error('Error refreshing subnets:', error);
-                    showNotification('Не удалось обновить данные подсетей', 'error');
                     subnetsData = [];
                 });
-        }function refreshBalancerData() {
+        } function refreshBalancerData() {
             fetch('/api/balancer/stats')
-                .then(response => response.json())
-                .then(data => {                    if (data.success) {
+                .then(response => response.json()).then(data => {
+                    if (data.success) {
                         balancerData = data.stats;
                         renderBalancerStats();
+                    } else {
+                        console.error('Failed to refresh balancer data:', data.error || 'Unknown error');
                     }
                 })
                 .catch(error => {
                     console.error('Failed to refresh balancer data:', error);
-                });            // Also fetch top proxies
+                });
+
+            // Also fetch top proxies
             const selectedMetric = document.getElementById('metricSelect')?.value || 'performance';
             fetch(`/api/balancer/top-proxies?metric=${selectedMetric}&limit=10`)
                 .then(response => response.json())
@@ -1021,6 +1021,7 @@
                     if (data.success && data.data && data.data.top_proxies) {
                         renderTopProxies(data.data.top_proxies);
                     } else {
+                        console.warn('No top proxies data available');
                         renderTopProxies([]);
                     }
                 })
@@ -1028,23 +1029,26 @@
                     console.error('Failed to fetch top proxies:', error);
                     renderTopProxies([]);
                 });
-        }        function renderBalancerStats() {
+        } function renderBalancerStats() {
             if (!balancerData) return;
 
             // Основная статистика
-            document.getElementById('balancerStatus').textContent = 
+            document.getElementById('balancerStatus').textContent =
                 balancerData.running ? 'Работает' : 'Остановлен';
             document.getElementById('listenPort').textContent = balancerData.listen_port || 8080;
             document.getElementById('totalProxies').textContent = balancerData.total_proxies || 0;
             document.getElementById('availableProxies').textContent = balancerData.available_proxies || 0;
-            document.getElementById('unavailableProxies').textContent = balancerData.unavailable_proxies || 0;
-            
-            // Упрощенная общая статистика
+            document.getElementById('unavailableProxies').textContent = balancerData.unavailable_proxies || 0;            // Упрощенная общая статистика
             const summary = balancerData.summary_stats || {};
-            document.getElementById('totalRequests').textContent = summary.total_requests || 0;
-            document.getElementById('successfulRequests').textContent = summary.successful_requests || 0;
-            document.getElementById('failedRequests').textContent = summary.failed_requests || 0;
-            document.getElementById('successRate').textContent = `${summary.overall_success_rate || 0}%`;
+            const totalRequestsEl = document.getElementById('totalRequests');
+            const successfulRequestsEl = document.getElementById('successfulRequests');
+            const failedRequestsEl = document.getElementById('failedRequests');
+            const successRateEl = document.getElementById('successRate');
+
+            if (totalRequestsEl) totalRequestsEl.textContent = summary.total_requests || 0;
+            if (successfulRequestsEl) successfulRequestsEl.textContent = summary.successful_requests || 0;
+            if (failedRequestsEl) failedRequestsEl.textContent = summary.failed_requests || 0;
+            if (successRateEl) successRateEl.textContent = `${summary.overall_success_rate || 0}%`;
 
             renderProxyDetailedList();
         }
@@ -1052,7 +1056,7 @@
         function renderProxyDetailedList() {
             const container = document.getElementById('proxyDetailedList');
             if (!container) return;
-            
+
             container.innerHTML = '';
 
             if (!balancerData.proxy_stats || Object.keys(balancerData.proxy_stats).length === 0) {
@@ -1065,17 +1069,17 @@
                 const scoreA = a[1].success_rate - (a[1].avg_response_time * 100);
                 const scoreB = b[1].success_rate - (b[1].avg_response_time * 100);
                 return scoreB - scoreA;
-            });            proxies.forEach(([port, stats]) => {
-                const isUnavailable = balancerData.unavailable_proxy_ports && 
-                                    balancerData.unavailable_proxy_ports.includes(parseInt(port));
-                
+            }); proxies.forEach(([port, stats]) => {
+                const isUnavailable = balancerData.unavailable_proxy_ports &&
+                    balancerData.unavailable_proxy_ports.includes(parseInt(port));
+
                 const proxyItem = document.createElement('div');
                 proxyItem.className = `proxy-item ${isUnavailable ? 'unavailable' : ''}`;
-                
+
                 // Определяем health status на основе упрощенной статистики
                 let healthClass = 'healthy';
                 let statusText = '✅ Активен';
-                
+
                 if (isUnavailable) {
                     healthClass = 'critical';
                     statusText = '❌ Недоступен';
@@ -1089,7 +1093,7 @@
                     healthClass = 'healthy';
                     statusText = '✅ Хорошо';
                 }
-                
+
                 proxyItem.innerHTML = `
                     <div class="proxy-header">
                         <span class="proxy-port">SOCKS5 :${port}</span>
@@ -1124,7 +1128,7 @@
                     <div class="proxy-actions">
                         <button class="btn btn-small btn-info" onclick="showProxyDetails(${port})">📊 Детали</button>
                     </div>
-                `;                
+                `;
                 container.appendChild(proxyItem);
             });
         }
@@ -1132,27 +1136,27 @@
         function renderTopProxies(topProxies) {
             const container = document.getElementById('topProxiesList');
             if (!container) return;
-            
+
             container.innerHTML = '';
 
             if (!topProxies || topProxies.length === 0) {
                 container.innerHTML = '<p>Нет данных о топ прокси</p>';
                 return;
-            }            topProxies.forEach((proxy, index) => {
+            } topProxies.forEach((proxy, index) => {
                 const item = document.createElement('div');
                 item.className = 'top-proxy-item';
-                
+
                 // Ensure numeric values are valid
                 const successRate = Number(proxy.success_rate) || 0;
                 const avgResponseTime = Number(proxy.avg_response_time) || 0;
                 const requestsLastMinute = Number(proxy.requests_last_minute) || 0;
                 const score = Number(proxy.score) || 0;
                 const port = Number(proxy.port) || 0;
-                
+
                 let statusClass = 'success';
                 if (successRate < 70) statusClass = 'error';
                 else if (successRate < 90) statusClass = 'warning';
-                
+
                 item.innerHTML = `
                     <div class="rank">#${index + 1}</div>
                     <div class="proxy-info">
@@ -1165,26 +1169,22 @@
                     </div>
                     <div class="score">${score.toFixed(1)}</div>
                 `;
-                
+
                 container.appendChild(item);
             });
         }
 
         function changeMetric() {
             refreshBalancerData();
-        }
-
-        function showProxyDetails(port) {
-            fetch(`/api/balancer/proxy/${port}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        showProxyModal(data.proxy_stats);
-                    }
-                })
-                .catch(error => {
-                    console.error('Failed to fetch proxy details:', error);
-                });
+        } function showProxyDetails(port) {
+            // В текущем API нет эндпоинта для получения детальной информации по конкретному прокси
+            // Показываем основную информацию из уже загруженных данных
+            if (balancerData && balancerData.proxy_stats && balancerData.proxy_stats[port]) {
+                const stats = balancerData.proxy_stats[port];
+                showProxyModal(stats, port);
+            } else {
+                showNotification(`Нет данных для прокси :${port}`, 'warning');
+            }
         }
 
         function showProxyModal(stats) {
@@ -1251,15 +1251,15 @@
                         ${stats.status_codes && Object.keys(stats.status_codes).length > 0 ? `
                             <h4>Коды ответов:</h4>
                             <div class="status-codes">
-                                ${Object.entries(stats.status_codes).map(([code, count]) => 
-                                    `<span class="status-code">${code}: ${count}</span>`
-                                ).join('')}
+                                ${Object.entries(stats.status_codes).map(([code, count]) =>
+                `<span class="status-code">${code}: ${count}</span>`
+            ).join('')}
                             </div>
                         ` : ''}
                     </div>
                 </div>
             `;
-            
+
             document.body.appendChild(modal);
             modal.style.display = 'block';
         }
@@ -1281,7 +1281,7 @@
         function timeAgo(timestamp) {
             const now = Date.now() / 1000;
             const diff = now - timestamp;
-            
+
             if (diff < 60) return `${Math.floor(diff)}s назад`;
             if (diff < 3600) return `${Math.floor(diff / 60)}m назад`;
             if (diff < 86400) return `${Math.floor(diff / 3600)}h назад`;
@@ -1295,12 +1295,12 @@
                     const instances = Number(subnet.instances) || 0;
                     return instances > 0;
                 }).length || 0;
-                
+
                 const totalInstances = subnetsData.reduce((sum, subnet) => {
                     const instances = Number(subnet.instances) || 0;
                     return sum + instances;
                 }, 0);
-                
+
                 // Ensure no NaN values
                 document.getElementById('totalSubnets').textContent = isNaN(totalSubnets) ? 0 : totalSubnets;
                 document.getElementById('activeSubnets').textContent = isNaN(activeSubnets) ? 0 : activeSubnets;
@@ -1318,7 +1318,7 @@
                 console.error('Subnet container not found');
                 return;
             }
-            
+
             if (!subnetsData || !Array.isArray(subnetsData)) {
                 console.warn('Subnets data is not available or not an array:', subnetsData);
                 container.innerHTML = '<p>Нет доступных подсетей</p>';
@@ -1338,23 +1338,23 @@
                     const limit = Number(subnet.limit) || 10;
                     const count = Number(subnet.count) || 0;
                     const subnetName = String(subnet.subnet || `Subnet-${index + 1}`);
-                    
+
                     // Format subnet as CIDR if it's not already
                     let subnetCIDR = subnetName;
                     if (!subnetName.includes('/')) {
                         // Assume it's a /16 subnet if no CIDR specified
                         subnetCIDR = `${subnetName}.0.0/16`;
                     }
-                    
+
                     // Determine status
                     const isActive = instances > 0;
                     const statusClass = isActive ? 'success' : 'inactive';
                     const statusText = isActive ? 'Активна' : 'Неактивна';
-                    
+
                     const subnetCard = document.createElement('div');
                     subnetCard.className = 'subnet-card';
                     subnetCard.dataset.subnet = subnetName;
-                    
+
                     subnetCard.innerHTML = `
                         <div class="subnet-header">
                             <div class="subnet-title">
@@ -1389,9 +1389,6 @@
                     console.error('Error rendering subnet:', subnet, error);
                 }
             });
-            
-            // Update selection UI
-            updateBulkControlsState();
         }
 
         // Функции управления подсетями (если еще не определены)
@@ -1403,19 +1400,19 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ instances: parseInt(instances) })
                 })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        showNotification(`Подсеть ${subnet} запущена`, 'success');
-                        refreshSubnets();
-                    } else {
-                        showNotification(data.message || 'Ошибка запуска подсети', 'error');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error starting subnet:', error);
-                    showNotification('Ошибка запуска подсети', 'error');
-                });
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            showNotification(`Подсеть ${subnet} запущена`, 'success');
+                            refreshSubnets();
+                        } else {
+                            showNotification(data.message || 'Ошибка запуска подсети', 'error');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error starting subnet:', error);
+                        showNotification('Ошибка запуска подсети', 'error');
+                    });
             }
         }
 
@@ -1448,23 +1445,24 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ instances: count })
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    showNotification(data.message, 'success');
-                    refreshSubnets();
-                } else {
-                    showNotification(data.message || 'Ошибка изменения инстансов', 'error');
-                }
-            })            .catch(error => {
-                console.error('Error setting subnet instances:', error);
-                showNotification('Ошибка изменения инстансов', 'error');
-            });        }
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showNotification(data.message, 'success');
+                        refreshSubnets();
+                    } else {
+                        showNotification(data.message || 'Ошибка изменения инстансов', 'error');
+                    }
+                }).catch(error => {
+                    console.error('Error setting subnet instances:', error);
+                    showNotification('Ошибка изменения инстансов', 'error');
+                });
+        }
 
         // Функция перезапуска подсети
         function restartSubnet(subnet) {
             showNotification(`Перезапуск подсети ${subnet}...`, 'info');
-            
+
             // Сначала останавливаем
             fetch(`/api/subnet/${subnet}/stop`, { method: 'POST' })
                 .then(response => response.json())
@@ -1474,25 +1472,25 @@
                         setTimeout(() => {
                             const subnetData = subnetsData.find(s => s.subnet === subnet);
                             const instances = subnetData ? subnetData.instances : 1;
-                            
+
                             fetch(`/api/subnet/${subnet}/start`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ instances: instances })
                             })
-                            .then(response => response.json())
-                            .then(data => {
-                                if (data.success) {
-                                    showNotification(`Подсеть ${subnet} перезапущена`, 'success');
-                                    refreshSubnets();
-                                } else {
-                                    showNotification(data.message || 'Ошибка запуска после перезапуска', 'error');
-                                }
-                            })
-                            .catch(error => {
-                                console.error('Error restarting subnet (start phase):', error);
-                                showNotification('Ошибка запуска при перезапуске', 'error');
-                            });
+                                .then(response => response.json())
+                                .then(data => {
+                                    if (data.success) {
+                                        showNotification(`Подсеть ${subnet} перезапущена`, 'success');
+                                        refreshSubnets();
+                                    } else {
+                                        showNotification(data.message || 'Ошибка запуска после перезапуска', 'error');
+                                    }
+                                })
+                                .catch(error => {
+                                    console.error('Error restarting subnet (start phase):', error);
+                                    showNotification('Ошибка запуска при перезапуске', 'error');
+                                });
                         }, 2000);
                     } else {
                         showNotification(data.message || 'Ошибка остановки при перезапуске', 'error');
@@ -1502,9 +1500,7 @@
                     console.error('Error restarting subnet (stop phase):', error);
                     showNotification('Ошибка остановки при перезапуске', 'error');
                 });
-        }
-
-        // Функции массового управления подсетями
+        }        // Функции массового управления подсетями
         function toggleSubnetSelection(checkbox) {
             const card = checkbox.closest('.subnet-card');
             if (checkbox.checked) {
@@ -1512,40 +1508,15 @@
             } else {
                 card.classList.remove('selected');
             }
-            updateBulkControlsState();
-        }        function updateBulkControlsState() {
-            const selectedCheckboxes = document.querySelectorAll('.subnet-checkbox:checked');
-            const startSelectedBtn = document.querySelector('button[onclick="startSelectedSubnets()"]');
-            const selectionInfo = document.getElementById('selectionInfo');
-            
-            // Обновляем состояние кнопки
-            if (startSelectedBtn) {
-                startSelectedBtn.disabled = selectedCheckboxes.length === 0;
-            }
-            
-            // Обновляем информационную панель
-            if (selectedCheckboxes.length > 0) {
-                const selectedSubnets = Array.from(selectedCheckboxes).map(cb => cb.value);
-                const totalRelays = selectedSubnets.reduce((sum, subnetName) => {
-                    const subnetData = subnetsData.find(s => s.subnet === subnetName);
-                    return sum + (subnetData ? (subnetData.count || 0) : 0);
-                }, 0);
-                
-                document.getElementById('selectedCount').textContent = selectedCheckboxes.length;
-                document.getElementById('selectedRelays').textContent = totalRelays;
-                selectionInfo.style.display = 'block';
-            } else {
-                selectionInfo.style.display = 'none';
-            }
         }
 
         function getSelectedSubnets() {
             const selectedCheckboxes = document.querySelectorAll('.subnet-checkbox:checked');
             return Array.from(selectedCheckboxes).map(cb => cb.value);
-        }        function getInstanceCount() {
+        } function getInstanceCount() {
             const select = document.getElementById('subnetCountSelect');
             const customInput = document.getElementById('customSubnetCount');
-            
+
             if (select.value === 'custom') {
                 return parseInt(customInput.value) || 1;
             } else {
@@ -1556,7 +1527,7 @@
         function getSubnetLimit() {
             const select = document.getElementById('subnetLimitSelect');
             const customInput = document.getElementById('customSubnetLimit');
-            
+
             if (select.value === 'custom-limit') {
                 return parseInt(customInput.value) || 10;
             } else if (select.value === 'all') {
@@ -1564,103 +1535,104 @@
             } else {
                 return parseInt(select.value) || 10;
             }
-        }        function startSelectedSubnets() {
+        } function startSelectedSubnets() {
             const selectedSubnets = getSelectedSubnets();
             const subnetLimit = getSubnetLimit();
-            
+
             if (selectedSubnets.length === 0) {
                 showNotification('Выберите подсети для запуска', 'warning');
                 return;
             }
-            
+
             // Применяем лимит подсетей
             let subnetsToStart = selectedSubnets;
             if (subnetLimit !== null && subnetLimit < selectedSubnets.length) {
                 subnetsToStart = selectedSubnets.slice(0, subnetLimit);
                 showNotification(`Запуск первых ${subnetLimit} из ${selectedSubnets.length} выбранных подсетей`, 'info');
             }
-            
+
             const instances = getInstanceCount();
             let completed = 0;
             let errors = 0;
-            
+
             if (subnetLimit !== null && subnetLimit < selectedSubnets.length) {
                 showNotification(`Запуск первых ${subnetsToStart.length} подсетей с ${instances} инстансами...`, 'info');
             } else {
                 showNotification(`Запуск ${subnetsToStart.length} подсетей с ${instances} инстансами...`, 'info');
             }
-            
+
             subnetsToStart.forEach(subnet => {
                 fetch(`/api/subnet/${subnet}/start`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ instances: instances })
                 })
-                .then(response => response.json())
-                .then(data => {
-                    completed++;
-                    if (!data.success) {
-                        errors++;
-                    }
-                    
-                    if (completed === subnetsToStart.length) {
-                        const successCount = completed - errors;
-                        if (errors === 0) {
-                            showNotification(`Все ${successCount} подсетей запущены успешно`, 'success');
-                        } else {
-                            showNotification(`${successCount} подсетей запущено, ${errors} с ошибками`, 'warning');
+                    .then(response => response.json())
+                    .then(data => {
+                        completed++;
+                        if (!data.success) {
+                            errors++;
                         }
-                        refreshSubnets();
-                    }
-                })
-                .catch(error => {
-                    console.error('Error starting subnet:', subnet, error);
-                    completed++;
-                    errors++;
-                    
-                    if (completed === subnetsToStart.length) {
-                        const successCount = completed - errors;
-                        showNotification(`${successCount} подсетей запущено, ${errors} с ошибками`, 'error');
-                        refreshSubnets();
-                    }
-                });
-            });        }
+
+                        if (completed === subnetsToStart.length) {
+                            const successCount = completed - errors;
+                            if (errors === 0) {
+                                showNotification(`Все ${successCount} подсетей запущены успешно`, 'success');
+                            } else {
+                                showNotification(`${successCount} подсетей запущено, ${errors} с ошибками`, 'warning');
+                            }
+                            refreshSubnets();
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error starting subnet:', subnet, error);
+                        completed++;
+                        errors++;
+
+                        if (completed === subnetsToStart.length) {
+                            const successCount = completed - errors;
+                            showNotification(`${successCount} подсетей запущено, ${errors} с ошибками`, 'error');
+                            refreshSubnets();
+                        }
+                    });
+            });
+        }
 
         function startTopSubnets() {
             const subnetLimit = getSubnetLimit();
             const instances = getInstanceCount();
-            
+
             if (!subnetsData || subnetsData.length === 0) {
                 showNotification('Нет доступных подсетей', 'warning');
                 return;
             }
-            
+
             // Сортируем подсети по количеству доступных релеев (count) в убывающем порядке
             const sortedSubnets = [...subnetsData]
                 .filter(subnet => subnet.instances === 0) // Только неактивные подсети
                 .sort((a, b) => (b.count || 0) - (a.count || 0));
-            
+
             if (sortedSubnets.length === 0) {
                 showNotification('Нет неактивных подсетей для запуска', 'info');
                 return;
             }
-            
+
             // Определяем количество подсетей для запуска
             const defaultLimit = 10;
             const actualLimit = subnetLimit !== null ? subnetLimit : defaultLimit;
             const subnetsToStart = sortedSubnets.slice(0, Math.min(actualLimit, sortedSubnets.length));
-            
+
             if (subnetsToStart.length === 0) {
                 showNotification('Нет подходящих подсетей для запуска', 'warning');
                 return;
             }
-            
+
             // Снимаем выбор со всех чекбоксов
             document.querySelectorAll('.subnet-checkbox').forEach(cb => {
                 cb.checked = false;
                 toggleSubnetSelection(cb);
             });
-            
+
             // Выбираем топ подсети
             subnetsToStart.forEach(subnetData => {
                 const checkbox = document.querySelector(`.subnet-checkbox[value="${subnetData.subnet}"]`);
@@ -1669,12 +1641,12 @@
                     toggleSubnetSelection(checkbox);
                 }
             });
-            
+
             let completed = 0;
             let errors = 0;
-            
+
             showNotification(`Запуск топ ${subnetsToStart.length} подсетей с ${instances} инстансами...`, 'info');
-            
+
             subnetsToStart.forEach(subnetData => {
                 const subnet = subnetData.subnet;
                 fetch(`/api/subnet/${subnet}/start`, {
@@ -1682,34 +1654,34 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ instances: instances })
                 })
-                .then(response => response.json())
-                .then(data => {
-                    completed++;
-                    if (!data.success) {
-                        errors++;
-                    }
-                    
-                    if (completed === subnetsToStart.length) {
-                        const successCount = completed - errors;
-                        if (errors === 0) {
-                            showNotification(`Все топ ${successCount} подсетей запущены успешно`, 'success');
-                        } else {
-                            showNotification(`${successCount} подсетей запущено, ${errors} с ошибками`, 'warning');
+                    .then(response => response.json())
+                    .then(data => {
+                        completed++;
+                        if (!data.success) {
+                            errors++;
                         }
-                        refreshSubnets();
-                    }
-                })
-                .catch(error => {
-                    console.error('Error starting top subnet:', subnet, error);
-                    completed++;
-                    errors++;
-                    
-                    if (completed === subnetsToStart.length) {
-                        const successCount = completed - errors;
-                        showNotification(`${successCount} подсетей запущено, ${errors} с ошибками`, 'error');
-                        refreshSubnets();
-                    }
-                });
+
+                        if (completed === subnetsToStart.length) {
+                            const successCount = completed - errors;
+                            if (errors === 0) {
+                                showNotification(`Все топ ${successCount} подсетей запущены успешно`, 'success');
+                            } else {
+                                showNotification(`${successCount} подсетей запущено, ${errors} с ошибками`, 'warning');
+                            }
+                            refreshSubnets();
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error starting top subnet:', subnet, error);
+                        completed++;
+                        errors++;
+
+                        if (completed === subnetsToStart.length) {
+                            const successCount = completed - errors;
+                            showNotification(`${successCount} подсетей запущено, ${errors} с ошибками`, 'error');
+                            refreshSubnets();
+                        }
+                    });
             });
         }
 
@@ -1717,18 +1689,18 @@
             if (!confirm('Вы уверены, что хотите остановить ВСЕ подсети?')) {
                 return;
             }
-            
+
             const activeSubnets = subnetsData.filter(subnet => (subnet.instances || 0) > 0);
             if (activeSubnets.length === 0) {
                 showNotification('Нет активных подсетей для остановки', 'info');
                 return;
             }
-            
+
             let completed = 0;
             let errors = 0;
-            
+
             showNotification(`Остановка ${activeSubnets.length} активных подсетей...`, 'info');
-            
+
             activeSubnets.forEach(subnetData => {
                 const subnet = subnetData.subnet;
                 fetch(`/api/subnet/${subnet}/stop`, { method: 'POST' })
@@ -1738,7 +1710,7 @@
                         if (!data.success) {
                             errors++;
                         }
-                        
+
                         if (completed === activeSubnets.length) {
                             const successCount = completed - errors;
                             if (errors === 0) {
@@ -1753,7 +1725,7 @@
                         console.error('Error stopping subnet:', subnet, error);
                         completed++;
                         errors++;
-                        
+
                         if (completed === activeSubnets.length) {
                             const successCount = completed - errors;
                             showNotification(`${successCount} подсетей остановлено, ${errors} с ошибками`, 'error');
@@ -1767,82 +1739,69 @@
             if (!confirm('Вы уверены, что хотите перезапустить ВСЕ активные подсети?')) {
                 return;
             }
-            
+
             const activeSubnets = subnetsData.filter(subnet => (subnet.instances || 0) > 0);
             if (activeSubnets.length === 0) {
                 showNotification('Нет активных подсетей для перезапуска', 'info');
                 return;
             }
-            
+
             showNotification(`Перезапуск ${activeSubnets.length} активных подсетей...`, 'info');
-            
+
             // Сначала останавливаем все
             stopAllSubnets();
-            
+
             // Через 5 секунд запускаем снова
             setTimeout(() => {
                 let completed = 0;
                 let errors = 0;
-                
+
                 activeSubnets.forEach(subnetData => {
                     const subnet = subnetData.subnet;
                     const instances = subnetData.instances || 1;
-                    
+
                     fetch(`/api/subnet/${subnet}/start`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ instances: instances })
                     })
-                    .then(response => response.json())
-                    .then(data => {
-                        completed++;
-                        if (!data.success) {
-                            errors++;
-                        }
-                        
-                        if (completed === activeSubnets.length) {
-                            const successCount = completed - errors;
-                            if (errors === 0) {
-                                showNotification(`Все ${successCount} подсетей перезапущены`, 'success');
-                            } else {
-                                showNotification(`${successCount} подсетей перезапущено, ${errors} с ошибками`, 'warning');
+                        .then(response => response.json())
+                        .then(data => {
+                            completed++;
+                            if (!data.success) {
+                                errors++;
                             }
-                            refreshSubnets();
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error restarting subnet:', subnet, error);
-                        completed++;
-                        errors++;
-                        
-                        if (completed === activeSubnets.length) {
-                            const successCount = completed - errors;
-                            showNotification(`${successCount} подсетей перезапущено, ${errors} с ошибками`, 'error');
-                            refreshSubnets();
-                        }
-                    });
-                });
-            }, 5000);        }
 
-        // Функция для выбора/снятия выбора всех подсетей
-        function toggleAllSubnets() {
-            const checkboxes = document.querySelectorAll('.subnet-checkbox');
-            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-            
-            checkboxes.forEach(checkbox => {
-                checkbox.checked = !allChecked;
-                toggleSubnetSelection(checkbox);
-            });
-            
-            const button = document.querySelector('button[onclick="toggleAllSubnets()"]');
-            if (button) {
-                button.textContent = allChecked ? '☑️ Выбрать все' : '☐ Снять выбор';
-            }
-        }        // Функция обработки изменения количества инстансов в подсетях
+                            if (completed === activeSubnets.length) {
+                                const successCount = completed - errors;
+                                if (errors === 0) {
+                                    showNotification(`Все ${successCount} подсетей перезапущены`, 'success');
+                                } else {
+                                    showNotification(`${successCount} подсетей перезапущено, ${errors} с ошибками`, 'warning');
+                                }
+                                refreshSubnets();
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error restarting subnet:', subnet, error);
+                            completed++;
+                            errors++;
+
+                            if (completed === activeSubnets.length) {
+                                const successCount = completed - errors;
+                                showNotification(`${successCount} подсетей перезапущено, ${errors} с ошибками`, 'error');
+                                refreshSubnets();
+                            }
+                        });
+                });
+            }, 5000);
+        }
+
+        // Функция обработки изменения количества инстансов в подсетях
         function handleSubnetCountChange() {
             const select = document.getElementById('subnetCountSelect');
             const customInput = document.getElementById('customSubnetCount');
-            
+
             if (select.value === 'custom') {
                 customInput.style.display = 'inline-block';
                 customInput.focus();
@@ -1855,7 +1814,7 @@
         function handleSubnetLimitChange() {
             const select = document.getElementById('subnetLimitSelect');
             const customInput = document.getElementById('customSubnetLimit');
-            
+
             if (select.value === 'custom-limit') {
                 customInput.style.display = 'inline-block';
                 customInput.focus();
@@ -1864,59 +1823,25 @@
             }
         }
 
-        // Функция фильтрации подсетей
-        function filterSubnets() {
-            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-            const subnetCards = document.querySelectorAll('.subnet-card');
-            
-            subnetCards.forEach(card => {
-                const subnetName = card.querySelector('h4').textContent.toLowerCase();
-                if (subnetName.includes(searchTerm)) {
-                    card.style.display = 'block';
-                } else {
-                    card.style.display = 'none';
-                }
-            });
-        }        // Инициализация при загрузке страницы
-        document.addEventListener('DOMContentLoaded', function() {
+        // Функции для глобального управления всеми сервисами
+        function refreshAllData() {
+            refreshBalancerData();
+            refreshSubnets();
+            updateSubnetStats();
+        }
+
+        // Инициализация при загрузке страницы
+        document.addEventListener('DOMContentLoaded', function () {
+            // Загружаем данные
             refreshAllData();
-            
+
             // Добавляем обработчик для субнет лимит селекта
             const subnetLimitSelect = document.getElementById('subnetLimitSelect');
             if (subnetLimitSelect) {
                 subnetLimitSelect.addEventListener('change', handleSubnetLimitChange);
-            }
-            
-            // Периодическое обновление данных каждые 10 секунд
+            }            // Периодическое обновление данных каждые 10 секунд
             setInterval(refreshAllData, 10000);
         });
-
-        // Вспомогательная функция для уведомлений
-        function showNotification(message, type = 'info') {
-            const notification = document.createElement('div');
-            notification.className = `notification ${type}`;
-            notification.textContent = message;
-            notification.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                padding: 15px;
-                border-radius: 5px;
-                color: white;
-                z-index: 10000;
-                font-weight: bold;
-                ${type === 'success' ? 'background-color: #4CAF50;' : ''}
-                ${type === 'error' ? 'background-color: #f44336;' : ''}
-                ${type === 'warning' ? 'background-color: #ff9800;' : ''}
-                ${type === 'info' ? 'background-color: #2196F3;' : ''}
-            `;
-            
-            document.body.appendChild(notification);
-            
-            setTimeout(() => {
-                notification.remove();
-            }, 3000);
-        }
     </script>
 </body>
 
