@@ -1,7 +1,8 @@
-
 import logging
 import time
 import threading
+import socket
+import select
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 from typing import List, Dict, Optional
@@ -38,6 +39,10 @@ class LoadBalancerHandler(BaseHTTPRequestHandler):
     
     def do_HEAD(self):
         self._handle_request()
+    
+    def do_CONNECT(self):
+        """Обработка CONNECT запросов для HTTPS туннелирования"""
+        self._handle_connect_request()
     
     def _handle_request(self):
         """Обработка HTTP запроса с балансировкой нагрузки через SOCKS5"""
@@ -83,6 +88,7 @@ class LoadBalancerHandler(BaseHTTPRequestHandler):
                     target_port = 80
                 target_path = self.path
                 scheme = 'https' if target_port == 443 else 'http'
+            
             try:
                 session = load_balancer.get_proxy_session(proxy_port)
                 if not session:
@@ -123,7 +129,6 @@ class LoadBalancerHandler(BaseHTTPRequestHandler):
                 logger.error(f"Proxy request failed for port {proxy_port}: {e}")
                 if load_balancer:
                     load_balancer.stats_manager.record_request(proxy_port, False, 0)
-                    
                     load_balancer.mark_proxy_unavailable(proxy_port)
                 
                 self._send_error_response(502, f"Proxy server error: {str(e)}")
@@ -131,6 +136,141 @@ class LoadBalancerHandler(BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Load balancer error: {e}")
             self._send_error_response(500, "Internal server error")
+    
+    def _handle_connect_request(self):
+        """Обработка CONNECT запроса для создания туннеля через готовые SOCKS5 sessions"""
+        try:
+            # Получаем следующий доступный прокси
+            load_balancer = getattr(self.server, 'load_balancer', None)
+            if not load_balancer:
+                self._send_error_response(503, "Load balancer not available")
+                return
+                
+            proxy_port = load_balancer.get_next_proxy()
+            
+            if not proxy_port:
+                self._send_error_response(503, "No available proxy servers")
+                return
+            
+            # Получаем готовую session для прокси
+            session = load_balancer.get_proxy_session(proxy_port)
+            if not session:
+                self._send_error_response(503, f"No session available for proxy {proxy_port}")
+                return
+            
+            # Парсим адрес назначения из CONNECT запроса
+            host_port = self.path
+            if ':' in host_port:
+                target_host, target_port = host_port.rsplit(':', 1)
+                target_port = int(target_port)
+            else:
+                target_host = host_port
+                target_port = 443  # Default HTTPS port
+            
+            # Используем готовую SOCKS5 session для создания подключения
+            try:
+                # Получаем базовый SOCKS5 сокет из готовой session
+                proxy_socket = self._create_socks_socket_from_session(session, target_host, target_port)
+                
+                # Отправляем 200 Connection Established
+                self.send_response(200, 'Connection Established')
+                self.send_header('Proxy-Agent', 'Tor-HTTP-Proxy/1.0')
+                self.end_headers()
+                
+                # Запускаем туннелирование данных
+                self._tunnel_data(self.connection, proxy_socket)
+                
+                if load_balancer:
+                    load_balancer.stats_manager.record_request(proxy_port, True, 200)
+                
+            except Exception as e:
+                logger.error(f"CONNECT tunnel failed for {host_port} via proxy {proxy_port}: {e}")
+                if load_balancer:
+                    load_balancer.stats_manager.record_request(proxy_port, False, 0)
+                    load_balancer.mark_proxy_unavailable(proxy_port)
+                
+                self._send_error_response(502, f"Tunnel connection failed: {str(e)}")
+                
+        except Exception as e:
+            logger.error(f"CONNECT request error: {e}")
+            self._send_error_response(500, "Internal server error")
+    
+    def _create_socks_socket_from_session(self, session: requests.Session, target_host: str, target_port: int):
+        """Создает SOCKS5 сокет используя настройки из готовой session"""
+        import socks
+        
+        # Извлекаем SOCKS5 настройки из готовой session
+        socks_proxy = session.proxies.get('https') or session.proxies.get('http')
+        if not socks_proxy or not socks_proxy.startswith('socks5://'):
+            raise Exception("Invalid SOCKS5 proxy configuration in session")
+        
+        # Парсим адрес SOCKS5 прокси (формат: socks5://127.0.0.1:port)
+        proxy_url = socks_proxy.replace('socks5://', '')
+        if ':' in proxy_url:
+            proxy_host, proxy_port = proxy_url.rsplit(':', 1)
+            proxy_port = int(proxy_port)
+        else:
+            proxy_host = proxy_url
+            proxy_port = 1080  # Default SOCKS port
+        
+        # Создаем SOCKS5 сокет с теми же настройками что и в session
+        proxy_socket = socks.socksocket()
+        proxy_socket.set_proxy(socks.SOCKS5, proxy_host, proxy_port)
+        proxy_socket.settimeout(30)
+        proxy_socket.connect((target_host, target_port))
+        
+        return proxy_socket
+    
+    def _tunnel_data(self, client_socket, proxy_socket):
+        """Туннелирование данных между клиентом и прокси"""
+        try:
+            # Устанавливаем неблокирующий режим
+            client_socket.settimeout(0.1)
+            proxy_socket.settimeout(0.1)
+            
+            while True:
+                # Проверяем доступность данных для чтения
+                ready_sockets, _, error_sockets = select.select(
+                    [client_socket, proxy_socket], [], [client_socket, proxy_socket], 1.0
+                )
+                
+                if error_sockets:
+                    break
+                
+                if not ready_sockets:
+                    continue
+                
+                # Передаем данные от клиента к прокси
+                if client_socket in ready_sockets:
+                    try:
+                        data = client_socket.recv(4096)
+                        if not data:
+                            break
+                        proxy_socket.sendall(data)
+                    except socket.timeout:
+                        continue
+                    except (ConnectionResetError, ConnectionAbortedError):
+                        break
+                
+                # Передаем данные от прокси к клиенту
+                if proxy_socket in ready_sockets:
+                    try:
+                        data = proxy_socket.recv(4096)
+                        if not data:
+                            break
+                        client_socket.sendall(data)
+                    except socket.timeout:
+                        continue
+                    except (ConnectionResetError, ConnectionAbortedError):
+                        break
+                        
+        except Exception as e:
+            logger.debug(f"Tunnel data transfer error: {e}")
+        finally:
+            try:
+                proxy_socket.close()
+            except:
+                pass
     
     def _send_error_response(self, status_code: int, message: str):
         try:
