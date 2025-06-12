@@ -12,7 +12,7 @@ from models import (
     SubnetData, get_current_timestamp, create_success_response, create_error_response
 )
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
