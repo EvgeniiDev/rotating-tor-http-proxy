@@ -30,51 +30,14 @@ if ! id -u proxy > /dev/null 2>&1; then
     sudo useradd -r -s /bin/false -g proxy -u 1000 proxy
 fi
 
-# Set up HAProxy configuration
-echo "Setting up HAProxy configuration..."
-# Remove default HAProxy config and copy our config
-sudo rm -f /etc/haproxy/haproxy.cfg
-if [ -f "src/haproxy.cfg" ]; then
-    sudo cp src/haproxy.cfg /etc/haproxy/haproxy.cfg
-else
-    echo "Error: src/haproxy.cfg not found!"
-    exit 1
-fi
-sudo chown proxy:proxy /etc/haproxy/haproxy.cfg
-sudo mkdir -p /var/lib/haproxy
-sudo chown -R proxy:proxy /var/lib/haproxy
-sudo mkdir -p /var/local/haproxy
-sudo chown -R proxy:proxy /var/local/haproxy
-sudo touch /var/local/haproxy/server-state
-sudo chown proxy:proxy /var/local/haproxy/server-state
 
 # Set up Tor configuration
 echo "Setting up Tor configuration..."
 sudo touch /etc/tor/torrc
 sudo chown -R proxy:proxy /etc/tor/
 
-# Set up Privoxy configuration
-echo "Setting up Privoxy configuration..."
-# Stop default Privoxy service
-sudo systemctl stop privoxy 2>/dev/null || true
-sudo systemctl disable privoxy 2>/dev/null || true
 
-# Create Privoxy directories with proper permissions
-sudo mkdir -p /etc/privoxy
-sudo mkdir -p /var/log/privoxy
-sudo mkdir -p /var/lib/privoxy
-sudo chown -R proxy:proxy /etc/privoxy
-sudo chown -R proxy:proxy /var/log/privoxy
-sudo chown -R proxy:proxy /var/lib/privoxy
 
-# Copy our Privoxy configuration
-if [ -f "src/privoxy.conf" ]; then
-    sudo cp src/privoxy.conf /etc/privoxy/config
-    sudo chown proxy:proxy /etc/privoxy/config
-    sudo chmod 644 /etc/privoxy/config
-else
-    echo "Warning: src/privoxy.conf not found!"
-fi
 
 # Create proxy user home directory and tmp
 echo "Setting up proxy user directories..."
@@ -99,5 +62,4 @@ echo "cd src && sudo -u proxy ./start_with_admin.sh"
 echo ""
 echo "The following ports will be exposed:"
 echo "- 1080/tcp: SOCKS proxy"
-echo "- 4444/tcp: HAProxy stats"
 echo "- 5000/tcp: Admin panel"
