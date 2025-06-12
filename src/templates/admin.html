@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tor SOCKS5 Proxy Admin Panel</title>
+    <title>Tor HTTP Proxy Admin Panel</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
     <style>
         * {
@@ -52,6 +52,38 @@
             margin-left: 8px;
         }
 
+        .status-indicator.offline {
+            background: #f44336;
+        }
+
+        .tabs {
+            display: flex;
+            margin-bottom: 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .tab {
+            padding: 10px 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            color: #fff;
+            cursor: pointer;
+            border-radius: 5px 5px 0 0;
+            margin-right: 5px;
+        }
+
+        .tab.active {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -68,9 +100,14 @@
             text-align: center;
         }
 
-        .stat-card.free-subnets {
+        .stat-card.balancer {
             background: rgba(76, 175, 80, 0.2);
             border-color: rgba(76, 175, 80, 0.3);
+        }
+
+        .stat-card.error {
+            background: rgba(244, 67, 54, 0.2);
+            border-color: rgba(244, 67, 54, 0.3);
         }
 
         .stat-number {
@@ -85,346 +122,474 @@
             opacity: 0.8;
         }
 
-        /* Status color coding */
-        .status-running {
-            color: #4CAF50 !important;
-        }
-
-        .status-starting {
-            color: #FF9800 !important;
-        }
-
-        .status-partial {
-            color: #FFC107 !important;
-        }
-
-        .status-stopped {
-            color: #F44336 !important;
-        }
-
-        .status-indicator-small {
-            display: inline-block;
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            margin-right: 6px;
-        }
-
-        .status-indicator-small.status-running {
-            background-color: #4CAF50;
-        }
-
-        .status-indicator-small.status-starting {
-            background-color: #FF9800;
-        }
-
-        .status-indicator-small.status-partial {
-            background-color: #FFC107;
-        }
-
-        .status-indicator-small.status-stopped {
-            background-color: #F44336;
-        }
-
         .controls {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 6px;
-            padding: 12px;
-            margin-bottom: 15px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .controls h3 {
-            margin-bottom: 8px;
-            font-size: 1rem;
-        }
-
-        .control-buttons {
             display: flex;
-            gap: 8px;
+            gap: 10px;
+            margin-bottom: 15px;
             flex-wrap: wrap;
         }
 
-        .service-status {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 10px;
-            margin-top: 10px;
-            padding-top: 10px;
-            border-top: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
         .btn {
-            padding: 6px 12px;
+            padding: 8px 16px;
             border: none;
             border-radius: 4px;
             cursor: pointer;
-            font-weight: bold;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .btn-primary {
             background: #4CAF50;
             color: white;
-            font-size: 0.8rem;
         }
 
-        .btn.danger {
+        .btn-secondary {
+            background: #2196F3;
+            color: white;
+        }
+
+        .btn-danger {
             background: #f44336;
+            color: white;
         }
 
-        .btn.warning {
-            background: #ff9800;
+        .btn-warning {
+            background: #FF9800;
+            color: white;
         }
 
-        .subnets-container {
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .balancer-stats {
             background: rgba(255, 255, 255, 0.1);
-            border-radius: 6px;
-            padding: 12px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
         }
 
-        .subnets-header {
+        .balancer-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 12px;
+            margin-bottom: 15px;
         }
 
-        .subnets-header h3 {
-            font-size: 1rem;
+        .proxy-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
         }
 
-        .search-box {
-            padding: 6px 10px;
-            border: none;
-            border-radius: 4px;
-            background: rgba(255, 255, 255, 0.9);
-            color: #333;
-            width: 250px;
+        .proxy-item {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            padding: 10px;
+            border-left: 4px solid #4CAF50;
+        }
+
+        .proxy-item.unavailable {
+            border-left-color: #f44336;
+            opacity: 0.7;
+        }
+
+        .proxy-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .proxy-port {
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+
+        .proxy-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 5px;
             font-size: 0.8rem;
         }
 
-        .subnet-list {
-            max-height: 70vh;
-            overflow-y: auto;
-            padding-right: 8px;
+        .proxy-stat {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .subnet-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 8px;
         }
 
         .subnet-item {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 4px;
-            padding: 6px 8px;
-            margin-bottom: 4px;
-            border-left: 3px solid transparent;
-            font-size: 0.75rem;
-        }
-
-        .subnet-item.active {
-            border-left-color: #4CAF50;
-            background: rgba(76, 175, 80, 0.1);
-        }
-
-        .subnet-item.starting {
-            border-left-color: #ff9800;
-            background: rgba(255, 152, 0, 0.1);
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            padding: 10px;
+            border-left: 4px solid #4CAF50;
         }
 
         .subnet-item.inactive {
-            border-left-color: #f44336;
-            background: rgba(244, 67, 54, 0.1);
+            border-left-color: #9E9E9E;
+            opacity: 0.7;
         }
 
-        .subnet-item.error {
-            border-left-color: #e91e63;
-            background: rgba(233, 30, 99, 0.1);
+        .subnet-item.blocked {
+            border-left-color: #f44336;
         }
 
         .subnet-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 4px;
+            margin-bottom: 8px;
         }
 
         .subnet-name {
-            font-size: 0.8rem;
             font-weight: bold;
+            font-size: 0.95rem;
         }
 
-        .subnet-toggle {
-            padding: 2px 8px;
-            border: none;
-            border-radius: 10px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 0.65rem;
-        }
-
-        .subnet-main-row {
+        .subnet-controls {
             display: flex;
-            align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin-bottom: 4px;
+            gap: 5px;
+            margin-top: 8px;
         }
 
-        .subnet-stats-compact {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-        }
-
-        .subnet-stat-compact {
-            display: flex;
-            align-items: center;
-            gap: 2px;
-            font-size: 0.65rem;
-        }
-
-        .subnet-stat-compact .number {
-            font-weight: bold;
-            color: #4CAF50;
-        }
-
-        .subnet-stat-compact .label {
-            opacity: 0.7;
-        }
-
-        .countries-compact {
-            display: flex;
-            gap: 2px;
-            flex-wrap: wrap;
-        }
-
-        .country-tag-compact {
-            background: rgba(255, 255, 255, 0.2);
-            padding: 1px 4px;
-            border-radius: 6px;
-            font-size: 0.6rem;
-        }
-
-        .controls-compact {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 0.65rem;
-        }
-
-        .controls-compact label {
-            font-size: 0.6rem;
-            opacity: 0.8;
-        }
-
-        .limit-input-compact,
-        .instances-input-compact {
-            padding: 2px 4px;
-            border: none;
-            border-radius: 2px;
-            background: rgba(255, 255, 255, 0.9);
-            color: #333;
-            width: 40px;
-            font-size: 0.65rem;
-        }
-
-        .restart-btn-compact {
-            padding: 2px 6px;
-            border: none;
-            border-radius: 2px;
-            background: #2196F3;
-            color: white;
-            cursor: pointer;
-            font-size: 0.6rem;
-        }
-
-        .last-update {
-            text-align: center;
-            margin-top: 10px;
-            opacity: 0.7;
-            font-size: 0.75rem;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 30px;
-            font-size: 0.9rem;
-        }
-
-        /* Компактные скроллбары */
-        .subnet-list::-webkit-scrollbar {
-            width: 6px;
-        }
-
-        .subnet-list::-webkit-scrollbar-track {
+        .search-bar {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
             background: rgba(255, 255, 255, 0.1);
-            border-radius: 3px;
+            color: #fff;
+            margin-bottom: 10px;
         }
 
-        .subnet-list::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.3);
-            border-radius: 3px;
+        .search-bar::placeholder {
+            color: rgba(255, 255, 255, 0.7);
         }
 
-        .subnet-list::-webkit-scrollbar-thumb:hover {
-            background: rgba(255, 255, 255, 0.5);
-        }
-
-        /* Компактные уведомления */
         .notification {
             position: fixed;
-            top: 10px;
-            right: 10px;
-            padding: 8px 12px;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
             border-radius: 4px;
             color: white;
             font-weight: bold;
             z-index: 1000;
-            max-width: 300px;
-            font-size: 0.8rem;
-            cursor: pointer;
+            animation: slideIn 0.3s ease;
         }
 
-        .notification-success {
+        .notification.success {
             background: #4CAF50;
         }
 
-        .notification-error {
+        .notification.error {
             background: #f44336;
         }
 
-        .notification-warning {
-            background: #ff9800;
-        }
-
-        .notification-info {
+        .notification.info {
             background: #2196F3;
         }
 
-        /* Адаптивность для маленьких экранов */
+        /* Стили для улучшенной статистики балансировщика */
+        .performance-stats {
+            margin: 20px 0;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+        }
+
+        .performance-stats h4 {
+            margin-bottom: 15px;
+            color: #fff;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .section-header h4 {
+            margin: 0;
+        }
+
+        .section-header select {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .top-proxies-list {
+            display: grid;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .top-proxy-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            border-left: 4px solid #4CAF50;
+        }
+
+        .top-proxy-item .rank {
+            font-weight: bold;
+            margin-right: 15px;
+            min-width: 30px;
+            color: #FFD700;
+        }
+
+        .top-proxy-item .proxy-info {
+            flex: 1;
+        }
+
+        .top-proxy-item .port {
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        .top-proxy-item .metrics {
+            display: flex;
+            gap: 15px;
+            margin-top: 5px;
+            font-size: 0.9em;
+        }
+
+        .top-proxy-item .score {
+            font-weight: bold;
+            font-size: 1.2em;
+            color: #4CAF50;
+        }
+
+        .proxy-detailed-stats {
+            margin-top: 30px;
+        }
+
+        .proxy-detailed-stats h4 {
+            margin-bottom: 15px;
+        }
+
+        .proxy-item {
+            margin-bottom: 15px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            border-left: 4px solid #4CAF50;
+        }
+
+        .proxy-item.unavailable {
+            border-left-color: #f44336;
+            opacity: 0.7;
+        }
+
+        .proxy-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .proxy-port {
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        .health-indicator {
+            font-size: 0.9em;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .health-indicator.healthy {
+            background: rgba(76, 175, 80, 0.2);
+        }
+
+        .health-indicator.warning {
+            background: rgba(255, 152, 0, 0.2);
+        }
+
+        .health-indicator.critical {
+            background: rgba(244, 67, 54, 0.2);
+        }
+
+        .health-indicator.inactive {
+            background: rgba(158, 158, 158, 0.2);
+        }
+
+        .proxy-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .proxy-stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+        }
+
+        .proxy-stat span:last-child {
+            font-weight: bold;
+        }
+
+        .proxy-stat .success {
+            color: #4CAF50;
+        }
+
+        .proxy-stat .warning {
+            color: #ff9800;
+        }
+
+        .proxy-stat .error {
+            color: #f44336;
+        }
+
+        .proxy-actions {
+            margin-top: 10px;
+            text-align: right;
+        }
+
+        .btn-small {
+            padding: 5px 10px;
+            font-size: 0.8em;
+        }
+
+        /* Модальное окно */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-content {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            margin: 5% auto;
+            padding: 0;
+            border-radius: 10px;
+            width: 80%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            color: #fff;
+        }
+
+        .close {
+            color: #fff;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .close:hover {
+            opacity: 0.7;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        .modal-body .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+        }
+
+        .stat-item label {
+            font-weight: bold;
+        }
+
+        .status-codes {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .status-code {
+            padding: 5px 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            font-size: 0.9em;
+        }
+
+        /* Уведомления */
+        .notification {
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        /* Адаптивность для мобильных устройств */
         @media (max-width: 768px) {
-            .container {
-                padding: 5px;
+            .proxy-stats-grid {
+                grid-template-columns: 1fr;
             }
-
-            .subnet-main-row {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 4px;
+            
+            .modal-content {
+                width: 95%;
+                margin: 10% auto;
             }
-
-            .subnet-stats-compact {
-                flex-wrap: wrap;
-            }
-
-            .stats-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-
-            .control-buttons {
-                justify-content: center;
-            }
-
-            .subnets-header {
-                flex-direction: column;
-                gap: 8px;
+            
+            .modal-body .stats-grid {
+                grid-template-columns: 1fr;
             }
         }
     </style>
@@ -433,515 +598,577 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>Tor Network Admin Panel <span class="status-indicator" id="status"></span></h1>
-            <p>Real-time management of Tor exit nodes and subnets</p>
+            <h1>Tor HTTP Proxy Admin Panel <span class="status-indicator" id="connectionStatus"></span></h1>
+            <p>Управление Tor сетью и HTTP балансировщиком</p>
         </div>
-        <div class="subnets-container">
-            <div class="subnets-header">
-                <h3>Service Management</h3>
-                <div class="control-buttons">
-                    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                        <label style="color: white; font-size: 0.9rem;">Start Tor on:</label>
-                        <select id="subnetCountSelect"
-                            style="padding: 6px 10px; border-radius: 4px; border: none; background: rgba(255,255,255,0.9); color: #333; font-size: 0.8rem;">
-                            <option value="all">All Inactive Subnets</option>
-                            <option value="10">10 Subnets</option>
-                            <option value="25">25 Subnets</option>
-                            <option value="custom">Custom Amount</option>
+
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('overview')">Обзор</button>
+            <button class="tab" onclick="switchTab('balancer')">HTTP Балансировщик</button>
+            <button class="tab" onclick="switchTab('subnets')">Подсети</button>
+        </div>
+
+        <!-- Overview Tab -->
+        <div id="overview" class="tab-content active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <span class="stat-number" id="totalSubnets">0</span>
+                    <span class="stat-label">Всего подсетей</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-number" id="activeSubnets">0</span>
+                    <span class="stat-label">Активных подсетей</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-number" id="runningInstances">0</span>
+                    <span class="stat-label">Запущено инстансов</span>
+                </div>
+                <div class="stat-card balancer">
+                    <span class="stat-number" id="balancerProxies">0</span>
+                    <span class="stat-label">Доступно прокси</span>
+                </div>
+                <div class="stat-card balancer">
+                    <span class="stat-number" id="totalRequests">0</span>
+                    <span class="stat-label">Всего запросов</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-number" id="successRate">0%</span>
+                    <span class="stat-label">Успешных запросов</span>
+                </div>
+            </div>
+
+            <div class="controls">
+                <button class="btn btn-primary" onclick="startAllServices()">🚀 Запустить все</button>
+                <button class="btn btn-danger" onclick="stopAllServices()">⏹️ Остановить все</button>
+                <button class="btn btn-warning" onclick="restartAllServices()">🔄 Перезапустить все</button>
+                <button class="btn btn-secondary" onclick="refreshAllData()">🔄 Обновить данные</button>
+            </div>
+        </div>        <!-- Balancer Tab -->
+        <div id="balancer" class="tab-content">
+            <div class="balancer-stats">
+                <div class="balancer-header">
+                    <h3>HTTP Load Balancer Status</h3>
+                    <div>
+                        <button class="btn btn-primary" onclick="startBalancer()">▶️ Запустить</button>
+                        <button class="btn btn-danger" onclick="stopBalancer()">⏹️ Остановить</button>
+                        <button class="btn btn-secondary" onclick="clearBalancerStats()">🗑️ Очистить статистику</button>
+                        <button class="btn btn-info" onclick="refreshBalancerData()">🔄 Обновить</button>
+                    </div>
+                </div>
+
+                <!-- Основная статистика -->
+                <div class="stats-grid">
+                    <div class="stat-card balancer">
+                        <span class="stat-number" id="balancerStatus">Неизвестно</span>
+                        <span class="stat-label">Статус</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-number" id="listenPort">8080</span>
+                        <span class="stat-label">Порт прослушивания</span>
+                    </div>
+                    <div class="stat-card success">
+                        <span class="stat-number" id="totalProxies">0</span>
+                        <span class="stat-label">Всего прокси</span>
+                    </div>                    <div class="stat-card success">
+                        <span class="stat-number" id="availableProxies">0</span>
+                        <span class="stat-label">Доступных</span>
+                    </div>
+                    <div class="stat-card error">
+                        <span class="stat-number" id="unavailableProxies">0</span>
+                        <span class="stat-label">Недоступных</span>
+                    </div>
+                </div>
+
+                <!-- Упрощенная статистика производительности -->
+                <div class="performance-stats">
+                    <h4>Общая статистика запросов</h4>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <span class="stat-number" id="totalRequests">0</span>
+                            <span class="stat-label">Всего запросов</span>
+                        </div>
+                        <div class="stat-card success">
+                            <span class="stat-number" id="successfulRequests">0</span>
+                            <span class="stat-label">Успешных</span>
+                        </div>
+                        <div class="stat-card error">
+                            <span class="stat-number" id="failedRequests">0</span>
+                            <span class="stat-label">Неудачных</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-number" id="successRate">0%</span>
+                            <span class="stat-label">Успешность</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Топ прокси -->
+                <div class="top-proxies">
+                    <div class="section-header">
+                        <h4>Топ прокси</h4>
+                        <select id="metricSelect" onchange="changeMetric()" style="padding: 5px; border-radius: 4px;">
+                            <option value="performance">По производительности</option>
+                            <option value="speed">По скорости</option>
+                            <option value="reliability">По надежности</option>
+                            <option value="traffic">По трафику</option>
                         </select>
-                        <input type="number" id="customSubnetCount" placeholder="Enter number" min="1" max="1000"
-                            style="padding: 6px 10px; border-radius: 4px; border: none; background: rgba(255,255,255,0.9); color: #333; font-size: 0.8rem; width: 120px; display: none;">
-                        <button class="btn" onclick="startSelectedSubnets()" id="startSelectedBtn"
-                            style="background: #2196F3; font-weight: bold;">🚀 Start Selected</button>
+                    </div>
+                    <div id="topProxiesList" class="top-proxies-list">
+                        <!-- Top proxies will be populated here -->
+                    </div>
+                </div>
+
+                <!-- Детальная статистика по прокси -->
+                <div class="proxy-detailed-stats">
+                    <h4>Детальная статистика прокси</h4>
+                    <div id="proxyDetailedList" class="proxy-list">
+                        <!-- Detailed proxy stats will be populated here -->
                     </div>
                 </div>
             </div>
         </div>
-        <div class="stats-grid" id="stats">
-            <div class="stat-card">
-                <span class="stat-number" id="totalSubnets">-</span> <span class="stat-label">📊 Total Subnets</span>
-            </div>
-            <div class="stat-card free-subnets" title="Подсети без запущенных Tor инстансов">
-                <span class="stat-number" id="freeSubnets">-</span>
-                <span class="stat-label">🟢 Free Subnets</span>
-            </div>
-            <div class="stat-card">
-                <span class="stat-number" id="activeSubnets">-</span>
-                <span class="stat-label">✅ Active Subnets</span>
-            </div>
-            <div class="stat-card">
-                <span class="stat-number" id="inactiveSubnets">-</span>
-                <span class="stat-label">⭕ Inactive Subnets</span>
-            </div>
-        </div>
-        <div class="subnets-container">
-            <div class="subnets-header">
-                <h3>Subnet Management</h3>
-                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                    <input type="text" class="search-box" placeholder="Search subnets..." id="searchInput"
-                        onkeyup="filterSubnets()" style="flex: 1; min-width: 200px;">
-                </div>
+
+        <!-- Subnets Tab -->
+        <div id="subnets" class="tab-content">
+            <input type="text" class="search-bar" id="searchInput" placeholder="Поиск подсетей..." onkeyup="filterSubnets()">
+            
+            <div class="controls">
+                <button class="btn btn-secondary" onclick="refreshSubnets()">🔄 Обновить подсети</button>
+                <select id="subnetCountSelect" style="padding: 8px; border-radius: 4px;">
+                    <option value="1">1 инстанс</option>
+                    <option value="2">2 инстанса</option>
+                    <option value="3">3 инстанса</option>
+                    <option value="5">5 инстансов</option>
+                    <option value="custom">Свое количество</option>
+                </select>
+                <input type="number" id="customSubnetCount" min="1" max="10" value="1" style="display: none; padding: 8px; border-radius: 4px; width: 80px;">
             </div>
 
-            <div class="subnet-list" id="subnetList">
-                <div class="loading">Loading subnet data...</div>
-            </div>
-
-            <div class="last-update" id="lastUpdate">
-                Last updated: Never
+            <div class="subnet-grid" id="subnetContainer">
+                <!-- Subnet items will be populated here -->
             </div>
         </div>
     </div>
-    <script>        const socket = io();
+
+    <script>
+        const socket = io();
         let subnetsData = [];
+        let balancerData = {};
 
-        socket.on('connect', () => {
-            updateStatus(true);
-            showNotification('Connected to server', 'success');
-            refreshData();
-        });
-
-        socket.on('disconnect', () => {
-            updateStatus(false);
-            showNotification('Connection lost', 'warning');
-        });
-
-        socket.on('subnet_update', data => {
-            if (data?.stats && data?.subnets && Array.isArray(data.subnets)) {
-                subnetsData = data.subnets;
-                updateStats(data.stats);
-                renderSubnets();
-            } else {
-                showNotification('Invalid subnet data received', 'error');
-            }
-        });
-
-        socket.on('subnet_status_update', data => {
-            const subnet = subnetsData.find(s => s.subnet === data.subnet);
-            if (subnet) {
-                const oldStatus = subnet.status;
-                subnet.status = data.status;
-                if (data.instances_count !== undefined) {
-                    subnet.running_instances = data.instances_count;
-                }
-                if (oldStatus !== data.status) {
-                    let message = `Subnet ${data.subnet}: ${getStatusText(data.status)}`;
-                    let type = data.status === 'running' ? 'success' :
-                        data.status === 'error' ? 'error' : 'info';
-                    if (data.status === 'running') message += ` (${data.instances_count || 1} instances)`;
-                    if (data.status === 'error' && data.error) message += ` - ${data.error}`;
-                    showNotification(message, type);
-                }
-                updateStatsFromSubnetsData();
-                renderSubnets();
-            }
-        });
-
-        socket.on('status_update', data => updateServiceStatus(data));
-
-        socket.on('tor_stats_update', data => {
-            if (data?.stats) {
-                document.getElementById('activeInstances').textContent = data.stats.running_instances || 0;
-                document.getElementById('activeSubnets').textContent = data.stats.active_subnets || 0;
-                document.getElementById('blockedSubnets').textContent = data.stats.blocked_subnets || 0;
-                document.getElementById('totalTorInstances').textContent = data.stats.tor_instances || 0;
-            }
-        }); function showNotification(message, type = 'info') {
-            const notification = document.createElement('div');
-            notification.className = `notification notification-${type}`;
-            notification.textContent = message;
-            notification.onclick = () => notification.remove();
-            document.body.appendChild(notification);
-            setTimeout(() => notification.remove(), 5000);
-        }
-        function updateStatus(connected) {
-            const indicator = document.querySelector('.status-indicator');
-            if (indicator) {
-                if (connected) {
-                    indicator.style.background = '#4CAF50';
-                } else {
-                    indicator.style.background = '#f44336';
-                }
-            }
-        }
-
-        function updateStats(stats) {
-            if (!stats) return;
-
-            const totalSubnetsElement = document.getElementById('totalSubnets');
-            if (totalSubnetsElement) {
-                totalSubnetsElement.textContent = stats.total_subnets || 0;
-            }
-
-            const activeSubnetsElement = document.getElementById('activeSubnets');
-            if (activeSubnetsElement) {
-                activeSubnetsElement.textContent = stats.active_subnets || 0;
-            }            // Add new statistics
-            const freeSubnetsElement = document.getElementById('freeSubnets');
-            if (freeSubnetsElement) {
-                freeSubnetsElement.textContent = stats.free_subnets || 0;
-            }
-
-            const inactiveSubnetsElement = document.getElementById('inactiveSubnets');
-            if (inactiveSubnetsElement) {
-                const inactiveCount = (stats.total_subnets || 0) - (stats.active_subnets || 0);
-                inactiveSubnetsElement.textContent = inactiveCount;
-            }
-
-            if (stats.last_update) {
-                const date = new Date(stats.last_update);
-                const lastUpdateElement = document.getElementById('lastUpdate');
-                if (lastUpdateElement) {
-                    lastUpdateElement.textContent = `Last updated: ${date.toLocaleString()}`;
-                }
-            }
-        }
-
-        function renderSubnets() {
-            const container = document.getElementById('subnetList');
-            if (!container) return;
-
-            if (!subnetsData || subnetsData.length === 0) {
-                container.innerHTML = '<div class="loading">No subnet data available</div>';
-                return;
-            }
-
-            container.innerHTML = subnetsData.map(subnet => {
-                const statusClass = subnet.status || 'available';
-                const isActive = subnet.status === 'active';
-                const buttonClass = isActive ? 'active' : 'inactive';
-                const buttonText = isActive ? 'Running' : 'Start';
-
-                return `
-                <div class="subnet-item ${statusClass}" data-subnet="${subnet.subnet}">
-                    <div class="subnet-header">
-                        <span class="subnet-name">
-                            <span class="status-indicator-small status-${statusClass}"></span>
-                            ${subnet.subnet}.0.0/16
-                        </span>
-                        <button class="subnet-toggle ${buttonClass}"
-                                onclick="toggleSubnet('${subnet.subnet}')"
-                                ${subnet.status === 'starting' ? 'disabled' : ''}>
-                            ${buttonText}
-                        </button>
-                    </div>
-                    <div class="subnet-main-row">
-                        <div class="subnet-stats-compact">
-                            <div class="subnet-stat-compact">
-                                <span class="number">${subnet.count || 0}</span>
-                                <span class="label">Available</span>
-                            </div>
-                            <div class="subnet-stat-compact">
-                                <span class="number">${subnet.running_instances || 0}</span>
-                                <span class="label">Running</span>
-                            </div>
-                            <div class="subnet-stat-compact">
-                                <span class="number">${subnet.limit || 1}</span>
-                                <span class="label">Limit</span>
-                            </div>
-                            <div class="subnet-stat-compact">
-                                <span class="number">${subnet.last_updated ? new Date(subnet.last_updated).toLocaleTimeString() : 'N/A'}</span>
-                                <span class="label">Updated</span>
-                            </div>
-                        </div>
-                        <div class="controls-compact">
-                            <label>Limit:</label>
-                            <input type="number" class="limit-input-compact" 
-                                   value="${subnet.limit || 1}" 
-                                   min="1" max="${subnet.count || 10}"
-                                   onchange="setSubnetLimit('${subnet.subnet}', this.value)">
-                            <label>Inst:</label>
-                            <input type="number" class="instances-input-compact" 
-                                   value="${subnet.running_instances || 1}" 
-                                   min="1" max="10"
-                                   onchange="setSubnetInstances('${subnet.subnet}', this.value)">
-                            ${isActive ? `<button class="restart-btn-compact" onclick="restartSubnet('${subnet.subnet}')">↻</button>` : ''}
-                        </div>
-                    </div>
-                </div>`;
-            }).join('');
-
-            updateStartInactiveButton();
-            updateStatsFromSubnetsData();
-        } function getStatusText(status) {
-            switch (status) {
-                case 'active': return 'Active';
-                case 'available': return 'Available';
-                case 'blocked': return 'Blocked';
-                case 'starting': return 'Starting';
-                case 'stopping': return 'Stopping';
-                case 'error': return 'Error';
-                default: return 'Unknown';
-            }
-        } function updateStartInactiveButton() {
-            const availableCount = subnetsData.filter(subnet =>
-                (!subnet.running_instances || subnet.running_instances === 0) &&
-                subnet.status !== 'starting'
-            ).length;
-
-            const button = document.getElementById('startSelectedBtn');
-            const customInput = document.getElementById('customSubnetCount');
-
-            if (button) {
-                if (availableCount > 0) {
-                    button.textContent = `🚀 Start Selected (${availableCount} available)`;
-                    button.disabled = false;
-                    button.style.background = '#2196F3';
-                } else {
-                    button.textContent = '✅ All Subnets Active';
-                    button.disabled = true;
-                    button.style.background = '#4CAF50';
-                }
-            }
-
-            // Update custom input placeholder and max value
-            if (customInput) {
-                customInput.placeholder = `Enter number (max ${availableCount})`;
-                customInput.max = availableCount;
-            }
-        }
-
-        function startSelectedSubnets() {
-            const selectElement = document.getElementById('subnetCountSelect');
-            const customInput = document.getElementById('customSubnetCount');              // Find all subnets without running instances
-            const availableSubnets = subnetsData.filter(subnet =>
-                (!subnet.running_instances || subnet.running_instances === 0) &&
-                subnet.status !== 'starting'
-            );
-
-            if (availableSubnets.length === 0) {
-                showNotification('All available subnets already have running instances', 'info');
-                return;
-            }
-
-            let selectedCount = selectElement.value;
-            if (selectedCount === 'custom') {
-                selectedCount = parseInt(customInput.value);
-                if (!selectedCount || selectedCount < 1) {
-                    showNotification('Please enter a valid number for custom amount', 'warning');
-                    return;
-                } if (selectedCount > availableSubnets.length) {
-                    showNotification(`Cannot start ${selectedCount} subnets - only ${availableSubnets.length} subnet(s) available without running instances`, 'warning');
-                    return;
-                }
-            } else if (selectedCount !== 'all') {
-                selectedCount = parseInt(selectedCount);
-            }            // Determine how many to start
-            let subnetsToStart;
-            if (selectedCount === 'all') {
-                subnetsToStart = availableSubnets;
-            } else {
-                subnetsToStart = availableSubnets.slice(0, selectedCount);
-            }
-
-            const count = subnetsToStart.length;
-            const subnetList = subnetsToStart.slice(0, 10).map(s => s.subnet).join(', ') +
-                (subnetsToStart.length > 10 ? '...' : '');
-
-            if (!confirm(`Start Tor on ${count} subnet(s)?\n\nFirst subnets: ${subnetList}`)) {
-                return;
-            }
-
-            showNotification(`Starting Tor on ${count} subnet(s)...`, 'info');
-
-            let successCount = 0;
-            let errorCount = 0;
-
-            // Start each selected subnet
-            subnetsToStart.forEach(subnet => {
-                fetch(`/api/subnet/${subnet.subnet}/start`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ instances: 1 })
-                })
-                    .then(response => response.json()).then(data => {
-                        if (data.success) {
-                            successCount++;
-                            console.log(`Started subnet ${subnet.subnet}`);
-
-                            // Update subnet data locally
-                            subnet.status = 'active';
-                            subnet.running_instances = 1;
-                        } else {
-                            errorCount++;
-                            console.error(`Failed to start subnet ${subnet.subnet}:`, data.error);
-                        }
-
-                        // Show final notification when all requests are done
-                        if (successCount + errorCount === count) {
-                            // Update stats after all operations complete
-                            updateStatsFromSubnetsData();
-
-                            if (errorCount === 0) {
-                                showNotification(`Successfully started ${successCount} subnet(s)`, 'success');
-                            } else {
-                                showNotification(`Started ${successCount} subnet(s), ${errorCount} failed`, 'warning');
-                            }
-                        }
-                    }).catch(error => {
-                        errorCount++;
-                        console.error(`Error starting subnet ${subnet.subnet}:`, error);
-
-                        // Show final notification when all requests are done
-                        if (successCount + errorCount === count) {
-                            // Update stats even if some failed
-                            updateStatsFromSubnetsData();
-                            showNotification(`Started ${successCount} subnet(s), ${errorCount} failed`, 'warning');
-                        }
-                    });
+        function switchTab(tabName) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
             });
-        }
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
 
-        function toggleSubnet(subnet) {
-            const subnetData = subnetsData.find(s => s.subnet === subnet);
-            const isActive = subnetData?.status === 'active';
-            const button = document.querySelector(`button[onclick="toggleSubnet('${subnet}')"]`);
+            // Show selected tab
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
 
-            if (button) {
-                button.disabled = true;
-                button.textContent = isActive ? 'Stopping...' : 'Starting...';
+            // Refresh data for the selected tab
+            if (tabName === 'balancer') {
+                refreshBalancerData();
+            } else if (tabName === 'subnets') {
+                refreshSubnets();
             }
-
-            const endpoint = isActive ? `/api/subnet/${subnet}/stop` : `/api/subnet/${subnet}/start`;
-            const instances = subnetData?.running_instances || 1;
-
-            apiRequest(endpoint, 'POST', { instances }, null, `Failed to toggle subnet ${subnet}`)
-                .then(() => {
-                    if (subnetData) {
-                        subnetData.status = isActive ? 'available' : 'active';
-                        subnetData.running_instances = isActive ? 0 : instances;
-                    }
-                    updateStatsFromSubnetsData();
-                    setTimeout(refreshData, 1000);
-                })
-                .finally(() => {
-                    if (button) {
-                        button.disabled = false;
-                        button.className = 'subnet-toggle';
-                    }
-                });
         }
 
-        function apiRequest(endpoint, method, body, successMsg, errorMsg) {
-            return fetch(endpoint, {
-                method,
-                headers: { 'Content-Type': 'application/json' },
-                body: body ? JSON.stringify(body) : undefined
-            })
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                document.body.removeChild(notification);
+            }, 3000);
+        }
+
+        function refreshAllData() {
+            refreshSubnets();
+            refreshBalancerData();
+            updateOverviewStats();
+        }
+
+        function refreshSubnets() {
+            fetch('/api/subnets')
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        if (successMsg) showNotification(successMsg, 'success');
-                        return data;
+                        subnetsData = data.subnets;
+                        renderSubnets();
+                        updateOverviewStats();
+                        showNotification(`Загружено ${data.subnets.length} подсетей`, 'success');
                     } else {
-                        if (errorMsg) showNotification(`${errorMsg}: ${data.error}`, 'error');
-                        throw new Error(data.error);
+                        showNotification(`Ошибка: ${data.error}`, 'error');
                     }
                 })
                 .catch(error => {
-                    if (errorMsg) showNotification(errorMsg, 'error');
-                    throw error;
+                    showNotification('Не удалось обновить данные подсетей', 'error');
                 });
-        }
-
-        function setSubnetLimit(subnet, limit) {
-            apiRequest(`/api/subnet/${subnet}/limit`, 'POST', { limit: parseInt(limit) },
-                `Subnet ${subnet} limit set to ${limit}`, `Failed to set limit for ${subnet}`);
-        }
-
-        function setSubnetInstances(subnet, instances) {
-            apiRequest(`/api/subnet/${subnet}/instances`, 'POST', { instances: parseInt(instances) },
-                `Subnet ${subnet} instances set to ${instances}`, `Failed to set instances for ${subnet}`);
-        }
-
-        function restartSubnet(subnet) {
-            if (!confirm(`Restart instances for subnet ${subnet}?`)) return;
-
-            apiRequest(`/api/subnet/${subnet}/restart`, 'POST', { instances: 1 },
-                `Subnet ${subnet} restarted successfully`, `Failed to restart ${subnet}`)
-                .then(() => {
-                    const subnetData = subnetsData.find(s => s.subnet === subnet);
-                    if (subnetData) {
-                        subnetData.is_active = true;
-                        subnetData.status = 'running';
-                    }
-                    updateStatsFromSubnetsData();
-                    setTimeout(refreshData, 1000);
-                });
-        }
-
-        function refreshData() {
-            fetch('/api/subnets')
-                .then(response => {
-                    if (!response.ok) throw new Error(`Server error: ${response.status}`);
-                    return response.json();
-                })
+        }        function refreshBalancerData() {
+            fetch('/api/balancer/stats')
+                .then(response => response.json())
                 .then(data => {
-                    if (data?.subnets && Array.isArray(data.subnets)) {
-                        subnetsData = data.subnets;
-                        if (data.stats) updateStats(data.stats);
-                        updateStatsFromSubnetsData();
-                        renderSubnets();
-                        showNotification(`Loaded ${data.subnets.length} subnets`, 'success');
-                    } else {
-                        showNotification(`Error: ${data.error || 'Invalid data'}`, 'error');
+                    if (data.success) {
+                        balancerData = data.stats;
+                        renderBalancerStats();
+                        updateOverviewStats();
                     }
                 })
-                .catch(error => showNotification('Failed to refresh data', 'error'));
-        } function updateStatsFromSubnetsData() {
-            if (!subnetsData || !Array.isArray(subnetsData)) return;
-
-            const totalSubnets = subnetsData.length;
-            const activeSubnets = subnetsData.filter(subnet =>
-                subnet.status === 'active' || subnet.status === 'running' ||
-                (subnet.running_instances && subnet.running_instances > 0)
-            ).length;
-            const freeSubnets = subnetsData.filter(subnet =>
-                (!subnet.running_instances || subnet.running_instances === 0) &&
-                subnet.status !== 'starting' && subnet.status !== 'blocked'
-            ).length;
-
-            document.getElementById('totalSubnets').textContent = totalSubnets;
-            document.getElementById('activeSubnets').textContent = activeSubnets;
-            document.getElementById('freeSubnets').textContent = freeSubnets;
-            document.getElementById('inactiveSubnets').textContent = totalSubnets - activeSubnets;
-            document.getElementById('lastUpdate').textContent = `Last updated: ${new Date().toLocaleString()}`;
-        }
-
-        function filterSubnets() {
-            const search = document.getElementById('searchInput').value.toLowerCase();
-            const items = document.querySelectorAll('.subnet-item');
-            let visibleCount = 0;
-            items.forEach(item => {
-                const subnet = item.dataset.subnet;
-                if (subnet.includes(search)) {
-                    item.style.display = 'block';
-                    visibleCount++;
-                } else {
-                    item.style.display = 'none';
-                }
-            });
-            if (search && visibleCount === 0) {
-                showNotification(`No subnets found matching "${search}"`, 'info');
-            }
-        }
-
-        document.addEventListener('DOMContentLoaded', function () {
-            refreshData();
-            const subnetCountSelect = document.getElementById('subnetCountSelect');
-            const customInput = document.getElementById('customSubnetCount');
-            if (subnetCountSelect && customInput) {
-                subnetCountSelect.addEventListener('change', function () {
-                    customInput.style.display = this.value === 'custom' ? 'inline-block' : 'none';
-                    if (this.value === 'custom') customInput.focus();
+                .catch(error => {
+                    console.error('Failed to refresh balancer data:', error);
                 });
-            }
-        });
 
-        socket.on('error', error => showNotification('Server error', 'error'));
-        socket.on('connect_error', error => showNotification('Connection error', 'error'));
+            // Also fetch top proxies
+            const selectedMetric = document.getElementById('metricSelect')?.value || 'performance';
+            fetch(`/api/balancer/top-proxies?metric=${selectedMetric}&limit=10`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        renderTopProxies(data.top_proxies);
+                    }
+                })
+                .catch(error => {
+                    console.error('Failed to fetch top proxies:', error);
+                });
+        }        function renderBalancerStats() {
+            if (!balancerData) return;
+
+            // Основная статистика
+            document.getElementById('balancerStatus').textContent = 
+                balancerData.running ? 'Работает' : 'Остановлен';
+            document.getElementById('listenPort').textContent = balancerData.listen_port || 8080;
+            document.getElementById('totalProxies').textContent = balancerData.total_proxies || 0;
+            document.getElementById('availableProxies').textContent = balancerData.available_proxies || 0;
+            document.getElementById('unavailableProxies').textContent = balancerData.unavailable_proxies || 0;
+            
+            // Упрощенная общая статистика
+            const summary = balancerData.summary_stats || {};
+            document.getElementById('totalRequests').textContent = summary.total_requests || 0;
+            document.getElementById('successfulRequests').textContent = summary.successful_requests || 0;
+            document.getElementById('failedRequests').textContent = summary.failed_requests || 0;
+            document.getElementById('successRate').textContent = `${summary.overall_success_rate || 0}%`;
+
+            renderProxyDetailedList();
+        }
+
+        function renderProxyDetailedList() {
+            const container = document.getElementById('proxyDetailedList');
+            if (!container) return;
+            
+            container.innerHTML = '';
+
+            if (!balancerData.proxy_stats || Object.keys(balancerData.proxy_stats).length === 0) {
+                container.innerHTML = '<p>Нет данных о прокси</p>';
+                return;
+            }
+
+            // Сортируем прокси по производительности
+            const proxies = Object.entries(balancerData.proxy_stats).sort((a, b) => {
+                const scoreA = a[1].success_rate - (a[1].avg_response_time * 100);
+                const scoreB = b[1].success_rate - (b[1].avg_response_time * 100);
+                return scoreB - scoreA;
+            });            proxies.forEach(([port, stats]) => {
+                const isUnavailable = balancerData.unavailable_proxy_ports && 
+                                    balancerData.unavailable_proxy_ports.includes(parseInt(port));
+                
+                const proxyItem = document.createElement('div');
+                proxyItem.className = `proxy-item ${isUnavailable ? 'unavailable' : ''}`;
+                
+                // Определяем health status на основе упрощенной статистики
+                let healthClass = 'healthy';
+                let statusText = '✅ Активен';
+                
+                if (isUnavailable) {
+                    healthClass = 'critical';
+                    statusText = '❌ Недоступен';
+                } else if (stats.success_rate < 50) {
+                    healthClass = 'critical';
+                    statusText = '🔴 Критично';
+                } else if (stats.success_rate < 80) {
+                    healthClass = 'warning';
+                    statusText = '🟡 Предупреждение';
+                } else {
+                    healthClass = 'healthy';
+                    statusText = '✅ Хорошо';
+                }
+                
+                proxyItem.innerHTML = `
+                    <div class="proxy-header">
+                        <span class="proxy-port">SOCKS5 :${port}</span>
+                        <span class="health-indicator ${healthClass}">${statusText}</span>
+                    </div>
+                    <div class="proxy-stats-grid">
+                        <div class="proxy-stat">
+                            <span>Всего запросов:</span>
+                            <span>${stats.total_requests || 0}</span>
+                        </div>
+                        <div class="proxy-stat">
+                            <span>Успешных:</span>
+                            <span class="success">${stats.successful_requests || 0}</span>
+                        </div>
+                        <div class="proxy-stat">
+                            <span>Неудачных:</span>
+                            <span class="error">${stats.failed_requests || 0}</span>
+                        </div>
+                        <div class="proxy-stat">
+                            <span>Успешность:</span>
+                            <span class="${stats.success_rate >= 80 ? 'success' : stats.success_rate >= 50 ? 'warning' : 'error'}">${stats.success_rate || 0}%</span>
+                        </div>
+                        <div class="proxy-stat">
+                            <span>Время работы:</span>
+                            <span>${formatUptime(stats.uptime_seconds || 0)}</span>
+                        </div>
+                        <div class="proxy-stat">
+                            <span>Последний запрос:</span>
+                            <span>${stats.last_request_time ? timeAgo(stats.last_request_time) : 'Никогда'}</span>
+                        </div>
+                    </div>
+                    <div class="proxy-actions">
+                        <button class="btn btn-small btn-info" onclick="showProxyDetails(${port})">📊 Детали</button>
+                    </div>
+                `;                
+                container.appendChild(proxyItem);
+            });
+        }
+
+        function renderTopProxies(topProxies) {
+            const container = document.getElementById('topProxiesList');
+            if (!container) return;
+            
+            container.innerHTML = '';
+
+            if (!topProxies || topProxies.length === 0) {
+                container.innerHTML = '<p>Нет данных о топ прокси</p>';
+                return;
+            }
+
+            topProxies.forEach((proxy, index) => {
+                const item = document.createElement('div');
+                item.className = 'top-proxy-item';
+                
+                let statusClass = 'success';
+                if (proxy.success_rate < 70) statusClass = 'error';
+                else if (proxy.success_rate < 90) statusClass = 'warning';
+                
+                item.innerHTML = `
+                    <div class="rank">#${index + 1}</div>
+                    <div class="proxy-info">
+                        <span class="port">:${proxy.port}</span>
+                        <div class="metrics">
+                            <span class="${statusClass}">${proxy.success_rate}% успех</span>
+                            <span>${(proxy.avg_response_time * 1000).toFixed(0)}ms</span>
+                            <span>${proxy.requests_last_minute || 0} req/min</span>
+                        </div>
+                    </div>
+                    <div class="score">${proxy.score || 0}</div>
+                `;
+                
+                container.appendChild(item);
+            });
+        }
+
+        function changeMetric() {
+            refreshBalancerData();
+        }
+
+        function showProxyDetails(port) {
+            fetch(`/api/balancer/proxy/${port}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showProxyModal(data.proxy_stats);
+                    }
+                })
+                .catch(error => {
+                    console.error('Failed to fetch proxy details:', error);
+                });
+        }
+
+        function showProxyModal(stats) {
+            // Create modal with detailed proxy statistics
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>Детальная статистика прокси :${stats.port}</h3>
+                        <span class="close" onclick="closeModal()">&times;</span>
+                    </div>
+                    <div class="modal-body">
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <label>Всего запросов:</label>
+                                <span>${stats.total_requests}</span>
+                            </div>
+                            <div class="stat-item">
+                                <label>Успешных:</label>
+                                <span>${stats.successful_requests}</span>
+                            </div>
+                            <div class="stat-item">
+                                <label>Неудачных:</label>
+                                <span>${stats.failed_requests}</span>
+                            </div>
+                            <div class="stat-item">
+                                <label>Общая успешность:</label>
+                                <span>${stats.success_rate}%</span>
+                            </div>
+                            <div class="stat-item">
+                                <label>Успешность (последние):</label>
+                                <span>${stats.recent_success_rate}%</span>
+                            </div>
+                            <div class="stat-item">
+                                <label>Среднее время ответа:</label>
+                                <span>${(stats.avg_response_time * 1000).toFixed(2)}ms</span>
+                            </div>
+                            <div class="stat-item">
+                                <label>Время ответа (последние):</label>
+                                <span>${(stats.recent_avg_response_time * 1000).toFixed(2)}ms</span>
+                            </div>
+                            <div class="stat-item">
+                                <label>Min время ответа:</label>
+                                <span>${(stats.min_response_time * 1000).toFixed(2)}ms</span>
+                            </div>
+                            <div class="stat-item">
+                                <label>Max время ответа:</label>
+                                <span>${(stats.max_response_time * 1000).toFixed(2)}ms</span>
+                            </div>
+                            <div class="stat-item">
+                                <label>Запросов в минуту:</label>
+                                <span>${stats.requests_per_minute}</span>
+                            </div>
+                            <div class="stat-item">
+                                <label>Время работы:</label>
+                                <span>${formatUptime(stats.uptime)}</span>
+                            </div>
+                            <div class="stat-item">
+                                <label>Последний запрос:</label>
+                                <span>${stats.last_request_time ? timeAgo(stats.last_request_time) : 'Никогда'}</span>
+                            </div>
+                        </div>
+                        ${stats.status_codes && Object.keys(stats.status_codes).length > 0 ? `
+                            <h4>Коды ответов:</h4>
+                            <div class="status-codes">
+                                ${Object.entries(stats.status_codes).map(([code, count]) => 
+                                    `<span class="status-code">${code}: ${count}</span>`
+                                ).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            modal.style.display = 'block';
+        }
+
+        function closeModal() {
+            const modal = document.querySelector('.modal');
+            if (modal) {
+                modal.remove();
+            }
+        }
+
+        function formatUptime(seconds) {
+            if (seconds < 60) return `${Math.floor(seconds)}s`;
+            if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+            if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+            return `${Math.floor(seconds / 86400)}d`;
+        }
+
+        function timeAgo(timestamp) {
+            const now = Date.now() / 1000;
+            const diff = now - timestamp;
+            
+            if (diff < 60) return `${Math.floor(diff)}s назад`;
+            if (diff < 3600) return `${Math.floor(diff / 60)}m назад`;
+            if (diff < 86400) return `${Math.floor(diff / 3600)}h назад`;
+            return `${Math.floor(diff / 86400)}d назад`;
+        }
+
+        function startBalancer() {
+            fetch('/api/balancer/start', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showNotification('HTTP балансировщик запущен', 'success');
+                        refreshBalancerData();
+                    } else {
+                        showNotification(data.message || 'Ошибка запуска', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error starting balancer:', error);
+                    showNotification('Ошибка запуска балансировщика', 'error');
+                });
+        }
+
+        function stopBalancer() {
+            fetch('/api/balancer/stop', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showNotification('HTTP балансировщик остановлен', 'success');
+                        refreshBalancerData();
+                    } else {
+                        showNotification(data.message || 'Ошибка остановки', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error stopping balancer:', error);
+                    showNotification('Ошибка остановки балансировщика', 'error');
+                });
+        }
+
+        function clearBalancerStats() {
+            if (confirm('Вы уверены, что хотите очистить всю статистику балансировщика?')) {
+                fetch('/api/balancer/clear-stats', { method: 'POST' })
+                    .then(response => response.json())
+                    .then data => {
+                        if (data.success) {
+                            showNotification('Статистика очищена', 'success');
+                            refreshBalancerData();
+                        } else {
+                            showNotification(data.message || 'Ошибка очистки', 'error');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error clearing stats:', error);
+                        showNotification('Ошибка очистки статистики', 'error');
+                    });
+            }
+        }
+
+        // Вспомогательная функция для уведомлений
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 15px;
+                border-radius: 5px;
+                color: white;
+                z-index: 10000;
+                font-weight: bold;
+                ${type === 'success' ? 'background-color: #4CAF50;' : ''}
+                ${type === 'error' ? 'background-color: #f44336;' : ''}
+                ${type === 'warning' ? 'background-color: #ff9800;' : ''}
+                ${type === 'info' ? 'background-color: #2196F3;' : ''}
+            `;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.remove();
+            }, 3000);
+        }
     </script>
 </body>
 
