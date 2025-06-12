@@ -253,6 +253,21 @@ def stop_http_balancer():
         return jsonify(create_error_response(f'Failed to stop HTTP Load Balancer: {str(e)}')), 500
 
 
+@app.route('/api/balancer/clear-stats', methods=['POST'])
+def clear_balancer_stats():
+    """Очистка статистики HTTP балансировщика"""
+    try:
+        if hasattr(http_balancer, 'stats_manager') and http_balancer.stats_manager:
+            # Очищаем статистику в stats_manager
+            http_balancer.stats_manager.clear_all_stats()
+            return jsonify(create_success_response('Balancer statistics cleared successfully'))
+        else:
+            return jsonify(create_error_response('Statistics manager not available'))
+    except Exception as e:
+        logger.error(f"Error clearing balancer statistics: {e}")
+        return jsonify(create_error_response(f'Failed to clear statistics: {str(e)}')), 500
+
+
 @app.route('/api/services/start', methods=['POST'])
 def start_all_services():
     """Запуск всех сервисов (Tor Network Manager + HTTP Load Balancer)"""

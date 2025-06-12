@@ -574,7 +574,88 @@
             to {
                 transform: translateX(0);
                 opacity: 1;
-            }
+            }        }
+
+        /* Стили для подсетей */
+        .subnet-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .subnet-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 15px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: transform 0.2s ease;
+        }
+
+        .subnet-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .subnet-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .subnet-header h4 {
+            margin: 0;
+            font-size: 1.1rem;
+            color: #fff;
+        }
+
+        .instances-count {
+            background: rgba(76, 175, 80, 0.8);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+
+        .subnet-controls {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .subnet-controls input[type="number"] {
+            width: 60px;
+            padding: 4px 6px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 0.9rem;
+        }
+
+        .search-bar {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 1rem;
+        }
+
+        .search-bar::placeholder {
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .search-bar:focus {
+            outline: none;
+            border-color: #2196F3;
+            box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.3);
         }
 
         /* Адаптивность для мобильных устройств */
@@ -734,7 +815,7 @@
             
             <div class="controls">
                 <button class="btn btn-secondary" onclick="refreshSubnets()">🔄 Обновить подсети</button>
-                <select id="subnetCountSelect" style="padding: 8px; border-radius: 4px;">
+                <select id="subnetCountSelect" onchange="handleSubnetCountChange()" style="padding: 8px; border-radius: 4px;">
                     <option value="1">1 инстанс</option>
                     <option value="2">2 инстанса</option>
                     <option value="3">3 инстанса</option>
@@ -1125,10 +1206,9 @@
         }
 
         function clearBalancerStats() {
-            if (confirm('Вы уверены, что хотите очистить всю статистику балансировщика?')) {
-                fetch('/api/balancer/clear-stats', { method: 'POST' })
+            if (confirm('Вы уверены, что хотите очистить всю статистику балансировщика?')) {                fetch('/api/balancer/clear-stats', { method: 'POST' })
                     .then(response => response.json())
-                    .then data => {
+                    .then(data => {
                         if (data.success) {
                             showNotification('Статистика очищена', 'success');
                             refreshBalancerData();
@@ -1140,8 +1220,233 @@
                         console.error('Error clearing stats:', error);
                         showNotification('Ошибка очистки статистики', 'error');
                     });
+            }        }
+
+        // Функции управления всеми сервисами
+        function startAllServices() {
+            fetch('/api/services/start', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showNotification('Все сервисы запущены', 'success');
+                        refreshAllData();
+                    } else {
+                        showNotification(data.message || 'Ошибка запуска сервисов', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error starting all services:', error);
+                    showNotification('Ошибка запуска всех сервисов', 'error');
+                });
+        }
+
+        function stopAllServices() {
+            fetch('/api/services/stop', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showNotification('Все сервисы остановлены', 'success');
+                        refreshAllData();
+                    } else {
+                        showNotification(data.message || 'Ошибка остановки сервисов', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error stopping all services:', error);
+                    showNotification('Ошибка остановки всех сервисов', 'error');
+                });
+        }
+
+        function restartAllServices() {
+            showNotification('Перезапуск всех сервисов...', 'info');
+            
+            // Сначала останавливаем все сервисы
+            fetch('/api/services/stop', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Ждем немного перед запуском
+                        setTimeout(() => {
+                            // Запускаем все сервисы
+                            fetch('/api/services/start', { method: 'POST' })
+                                .then(response => response.json())
+                                .then(data => {
+                                    if (data.success) {
+                                        showNotification('Все сервисы перезапущены', 'success');
+                                        refreshAllData();
+                                    } else {
+                                        showNotification(data.message || 'Ошибка запуска после перезапуска', 'error');
+                                    }
+                                })
+                                .catch(error => {
+                                    console.error('Error restarting services (start phase):', error);
+                                    showNotification('Ошибка запуска при перезапуске', 'error');
+                                });
+                        }, 2000); // Ждем 2 секунды
+                    } else {
+                        showNotification(data.message || 'Ошибка остановки при перезапуске', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error restarting services (stop phase):', error);
+                    showNotification('Ошибка остановки при перезапуске', 'error');
+                });
+        }
+
+        // Функция обновления общей статистики в обзоре
+        function updateOverviewStats() {
+            // Статистика подсетей
+            if (subnetsData && Array.isArray(subnetsData)) {
+                document.getElementById('totalSubnets').textContent = subnetsData.length;
+                const activeSubnets = subnetsData.filter(subnet => subnet.instances > 0).length;
+                document.getElementById('activeSubnets').textContent = activeSubnets;
+                const totalInstances = subnetsData.reduce((sum, subnet) => sum + subnet.instances, 0);
+                document.getElementById('runningInstances').textContent = totalInstances;
+            }
+
+            // Статистика балансировщика в обзоре
+            if (balancerData) {
+                document.getElementById('balancerProxies').textContent = balancerData.available_proxies || 0;
+                
+                const summary = balancerData.summary_stats || {};
+                document.getElementById('totalRequests').textContent = summary.total_requests || 0;
+                document.getElementById('successRate').textContent = `${summary.overall_success_rate || 0}%`;
             }
         }
+
+        // Функция для рендеринга подсетей (если еще не определена)
+        function renderSubnets() {
+            const container = document.getElementById('subnetContainer');
+            if (!container || !subnetsData) return;
+
+            container.innerHTML = '';
+
+            if (subnetsData.length === 0) {
+                container.innerHTML = '<p>Нет доступных подсетей</p>';
+                return;
+            }
+
+            subnetsData.forEach(subnet => {
+                const subnetCard = document.createElement('div');
+                subnetCard.className = 'subnet-card';
+                subnetCard.innerHTML = `
+                    <div class="subnet-header">
+                        <h4>${subnet.subnet}</h4>
+                        <span class="instances-count">${subnet.instances} / ${subnet.limit || 10}</span>
+                    </div>
+                    <div class="subnet-controls">
+                        <button class="btn btn-sm btn-primary" onclick="startSubnet('${subnet.subnet}')">Запустить</button>
+                        <button class="btn btn-sm btn-danger" onclick="stopSubnet('${subnet.subnet}')">Остановить</button>
+                        <input type="number" value="${subnet.instances}" min="0" max="${subnet.limit || 10}" 
+                               onchange="setSubnetInstances('${subnet.subnet}', this.value)">
+                    </div>
+                `;
+                container.appendChild(subnetCard);
+            });
+        }
+
+        // Функции управления подсетями (если еще не определены)
+        function startSubnet(subnet) {
+            const instances = prompt(`Количество инстансов для запуска в подсети ${subnet}:`, '1');
+            if (instances && parseInt(instances) > 0) {
+                fetch(`/api/subnet/${subnet}/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ instances: parseInt(instances) })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showNotification(`Подсеть ${subnet} запущена`, 'success');
+                        refreshSubnets();
+                    } else {
+                        showNotification(data.message || 'Ошибка запуска подсети', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error starting subnet:', error);
+                    showNotification('Ошибка запуска подсети', 'error');
+                });
+            }
+        }
+
+        function stopSubnet(subnet) {
+            fetch(`/api/subnet/${subnet}/stop`, { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showNotification(`Подсеть ${subnet} остановлена`, 'success');
+                        refreshSubnets();
+                    } else {
+                        showNotification(data.message || 'Ошибка остановки подсети', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error stopping subnet:', error);
+                    showNotification('Ошибка остановки подсети', 'error');
+                });
+        }
+
+        function setSubnetInstances(subnet, instances) {
+            const count = parseInt(instances);
+            if (isNaN(count) || count < 0) {
+                showNotification('Неверное количество инстансов', 'error');
+                return;
+            }
+
+            fetch(`/api/subnet/${subnet}/instances`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ instances: count })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification(data.message, 'success');
+                    refreshSubnets();
+                } else {
+                    showNotification(data.message || 'Ошибка изменения инстансов', 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error setting subnet instances:', error);
+                showNotification('Ошибка изменения инстансов', 'error');            });        }
+
+        // Функция обработки изменения количества инстансов в подсетях
+        function handleSubnetCountChange() {
+            const select = document.getElementById('subnetCountSelect');
+            const customInput = document.getElementById('customSubnetCount');
+            
+            if (select.value === 'custom') {
+                customInput.style.display = 'inline-block';
+                customInput.focus();
+            } else {
+                customInput.style.display = 'none';
+            }
+        }
+
+        // Функция фильтрации подсетей
+        function filterSubnets() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const subnetCards = document.querySelectorAll('.subnet-card');
+            
+            subnetCards.forEach(card => {
+                const subnetName = card.querySelector('h4').textContent.toLowerCase();
+                if (subnetName.includes(searchTerm)) {
+                    card.style.display = 'block';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+        }
+
+        // Инициализация при загрузке страницы
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshAllData();
+            
+            // Периодическое обновление данных каждые 10 секунд
+            setInterval(refreshAllData, 10000);
+        });
 
         // Вспомогательная функция для уведомлений
         function showNotification(message, type = 'info') {
