@@ -17,6 +17,9 @@ class LoadBalancerHTTPServer(HTTPServer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.load_balancer: Optional['HTTPLoadBalancer'] = None
+        # Важно: устанавливаем опцию повторного использования адреса для сервера
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.allow_reuse_address = True
 
 
 class LoadBalancerHandler(BaseHTTPRequestHandler):
@@ -160,12 +163,12 @@ class LoadBalancerHandler(BaseHTTPRequestHandler):
             logger.info(f"Establishing CONNECT tunnel to {target_host}:{target_port} via proxy {proxy_port}")
             
             proxy_socket = self._create_socks_socket_from_session(
-                session, target_host, target_port)
-
-            # Отправляем успешный ответ клиенту
+                session, target_host, target_port)            # Отправляем успешный ответ клиенту
             self.send_response(200, 'Connection Established')
             self.send_header('Proxy-Agent', 'Tor-HTTP-Proxy/1.0')
-            self.end_headers()            # Записываем успешную статистику
+            self.end_headers()
+            
+            # Записываем успешную статистику
             load_balancer.stats_manager.record_request(proxy_port, True, 200)
             
             # Сбрасываем счетчик ошибок для успешного соединения
@@ -186,7 +189,8 @@ class LoadBalancerHandler(BaseHTTPRequestHandler):
             try:
                 self._send_error_response(
                     502, f"Tunnel connection failed: {str(e)}")
-            except:
+            except Exception as send_error:
+                logger.debug(f"Could not send error response: {send_error}")
                 pass  # Соединение могло быть уже закрыто
         finally:
             # proxy_socket закрывается в _tunnel_data
@@ -213,6 +217,9 @@ class LoadBalancerHandler(BaseHTTPRequestHandler):
         proxy_socket.set_proxy(socks.SOCKS5, proxy_host, proxy_port)
         proxy_socket.settimeout(30)
         
+        # Важно: включаем опцию повторного использования адреса
+        proxy_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        
         logger.debug(f"Connecting to {target_host}:{target_port} via SOCKS5 proxy {proxy_host}:{proxy_port}")
         proxy_socket.connect((target_host, target_port))
         logger.debug(f"Successfully connected to {target_host}:{target_port}")
@@ -221,15 +228,14 @@ class LoadBalancerHandler(BaseHTTPRequestHandler):
 
     def _tunnel_data(self, client_socket, proxy_socket):
         try:
-            # Увеличиваем таймауты и убираем блокирующее поведение
-            client_socket.settimeout(30)
+            # НЕ устанавливаем таймауты на клиентский сокет для HTTP сервера
             proxy_socket.settimeout(30)
 
             while True:
                 try:
                     ready_sockets, _, error_sockets = select.select(
                         [client_socket, proxy_socket], [], [
-                            client_socket, proxy_socket], 0.5
+                            client_socket, proxy_socket], 1.0
                     )
 
                     if error_sockets:
@@ -252,6 +258,12 @@ class LoadBalancerHandler(BaseHTTPRequestHandler):
                         except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError) as e:
                             logger.debug(f"Client connection error: {e}")
                             break
+                        except OSError as e:
+                            if e.errno in (9, 107):  # Bad file descriptor, Transport endpoint is not connected
+                                logger.debug(f"Client socket closed: {e}")
+                                break
+                            logger.error(f"Client socket OS error: {e}")
+                            break
                         except Exception as e:
                             logger.error(f"Unexpected client socket error: {e}")
                             break
@@ -268,6 +280,12 @@ class LoadBalancerHandler(BaseHTTPRequestHandler):
                         except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError) as e:
                             logger.debug(f"Proxy connection error: {e}")
                             break
+                        except OSError as e:
+                            if e.errno in (9, 107):  # Bad file descriptor, Transport endpoint is not connected
+                                logger.debug(f"Proxy socket closed: {e}")
+                                break
+                            logger.error(f"Proxy socket OS error: {e}")
+                            break
                         except Exception as e:
                             logger.error(f"Unexpected proxy socket error: {e}")
                             break
@@ -282,13 +300,10 @@ class LoadBalancerHandler(BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Fatal error in tunnel_data: {e}")
         finally:
-            # Закрываем оба сокета
+            # Закрываем только proxy_socket, client_socket управляется HTTP сервером
             try:
-                client_socket.close()
-            except:
-                pass
-            try:
-                proxy_socket.close()
+                if proxy_socket:
+                    proxy_socket.close()
             except:
                 pass
 
@@ -391,10 +406,8 @@ class HTTPLoadBalancer:
             if not self.available_proxies:
                 return None
 
-            proxy_port = self.available_proxies[self.current_index]
-            self.current_index = (self.current_index +
-                                  1) % len(self.available_proxies)
-
+            # Используем случайный выбор вместо круговой очереди для лучшего распределения нагрузки
+            proxy_port = random.choice(self.available_proxies)
             return proxy_port
 
     def get_proxy_session(self, port: int) -> Optional[requests.Session]:
@@ -413,8 +426,8 @@ class HTTPLoadBalancer:
             
             self.proxy_failure_counts[port] += consecutive_failures
             
-            # Помечаем прокси как недоступный только после 3 подряд идущих ошибок
-            if self.proxy_failure_counts[port] >= 3:
+            # Помечаем прокси как недоступный только после 5 подряд идущих ошибок (увеличено с 3)
+            if self.proxy_failure_counts[port] >= 5:
                 if port in self.available_proxies:
                     self.available_proxies.remove(port)
                     if port not in self.unavailable_proxies:
