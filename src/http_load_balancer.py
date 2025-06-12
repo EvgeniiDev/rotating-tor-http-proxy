@@ -3,6 +3,7 @@ import time
 import threading
 import socket
 import select
+import random
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 from typing import List, Dict, Optional
@@ -301,6 +302,9 @@ class HTTPLoadBalancer:
         self.stats_manager = StatisticsManager()
         self.last_health_check = 0
         self.health_check_interval = 30  # Проверяем здоровье недоступных прокси каждые 30 секунд
+        # Фоновый поток для проверки прокси
+        self.health_check_thread: Optional[threading.Thread] = None
+        self.health_check_stop_event = threading.Event()
     
     def add_proxy(self, port: int):
         with self.lock:
@@ -316,6 +320,9 @@ class HTTPLoadBalancer:
             
             self.proxy_sessions[port] = session
             self.stats_manager.add_proxy(port)
+            
+            # Добавляем задержку перед проверкой для новых Tor соединений
+            time.sleep(3)
             
             if self._test_proxy_connection(session, port):
                 self.available_proxies.append(port)
@@ -342,29 +349,52 @@ class HTTPLoadBalancer:
                 
             self.stats_manager.remove_proxy(port)
             logger.info(f"Removed SOCKS5 proxy with persistent connection on port {port}")
-    
+
     def _test_proxy_connection(self, session: requests.Session, port: int) -> bool:
-        try:
-            # Быстрая проверка через httpbin
-            response = session.get('http://httpbin.org/ip', timeout=10)
-            return response.status_code == 200
-        except:
-            return False
+        """Проверка соединения через SOCKS5 прокси с множественными попытками"""
+        test_urls = [
+            'http://httpbin.org/ip',
+            'http://icanhazip.com',
+            'http://ifconfig.me/ip'
+        ]
+        
+        # Для новых Tor соединений даем больше времени
+        max_attempts = 3
+        base_timeout = 15
+        
+        for attempt in range(max_attempts):
+            for url in test_urls:
+                try:
+                    timeout = base_timeout + (attempt * 5)  # Увеличиваем таймаут с каждой попыткой
+                    logger.debug(f"Testing proxy {port}, attempt {attempt + 1}/{max_attempts}, URL: {url}, timeout: {timeout}s")
+                    
+                    response = session.get(url, timeout=timeout)
+                    if response.status_code == 200:
+                        logger.debug(f"Proxy {port} test successful with {url}")
+                        return True
+                        
+                except requests.exceptions.RequestException as e:
+                    logger.debug(f"Proxy {port} test failed for {url}: {e}")
+                    continue
+                except Exception as e:
+                    logger.debug(f"Proxy {port} unexpected error for {url}: {e}")
+                    continue
+            
+            # Между попытками делаем паузу для Tor соединений
+            if attempt < max_attempts - 1:
+                time.sleep(2)
+        
+        logger.warning(f"Proxy {port} failed all connection tests")
+        return False
     
     def get_next_proxy(self) -> Optional[int]:
         """Максимально быстрое получение следующего доступного прокси (round-robin)"""
         with self.lock:
-            # Если нет доступных прокси, проверяем недоступные
+            # Если нет доступных прокси, возвращаем None
+            # Фоновый поток автоматически проверяет и восстанавливает недоступные прокси
             if not self.available_proxies:
-                current_time = time.time()
-                if current_time - self.last_health_check > self.health_check_interval:
-                    self._check_proxy_health()
-                    self.last_health_check = current_time
-                
-                # Если все еще нет доступных прокси
-                if not self.available_proxies:
-                    logger.warning("No available SOCKS5 proxy servers")
-                    return None
+                logger.warning("No available SOCKS5 proxy servers")
+                return None
             
             # Простой round-robin без дополнительных проверок для максимальной скорости
             proxy_port = self.available_proxies[self.current_index]
@@ -418,7 +448,13 @@ class HTTPLoadBalancer:
             self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
             self.server_thread.start()
             
+            # Запускаем фоновый поток для проверки прокси
+            self.health_check_stop_event.clear()
+            self.health_check_thread = threading.Thread(target=self._background_health_checker, daemon=True)
+            self.health_check_thread.start()
+            
             logger.info(f"HTTP Load Balancer started on port {self.listen_port} (proxying to SOCKS5)")
+            logger.info("Background proxy health checker started")
         except Exception as e:
             logger.error(f"Failed to start HTTP load balancer: {e}")
             raise
@@ -426,6 +462,12 @@ class HTTPLoadBalancer:
     def stop(self):
         """Остановка HTTP балансировщика и закрытие всех persistent connections"""
         logger.info("Stopping HTTP Load Balancer...")
+        
+        # Останавливаем фоновый поток проверки прокси
+        if self.health_check_thread and self.health_check_thread.is_alive():
+            logger.info("Stopping background proxy health checker...")
+            self.health_check_stop_event.set()
+            self.health_check_thread.join(timeout=10)
         
         # Останавливаем HTTP сервер
         if self.server:
@@ -468,3 +510,63 @@ class HTTPLoadBalancer:
     
     def get_proxy_list(self) -> List[int]:
         return self.available_proxies + self.unavailable_proxies
+    
+    def _background_health_checker(self):
+        """Фоновый поток для непрерывной проверки здоровья прокси"""
+        logger.info("Background proxy health checker started")
+        
+        while not self.health_check_stop_event.is_set():
+            try:
+                # Проверяем недоступные прокси
+                if self.unavailable_proxies:
+                    with self.lock:
+                        # Создаем копию списка для безопасной итерации
+                        proxies_to_check = self.unavailable_proxies.copy()
+                    
+                    # Проверяем только несколько прокси за раз
+                    max_check_per_cycle = min(2, len(proxies_to_check))
+                    selected_proxies = proxies_to_check[:max_check_per_cycle]
+                    
+                    for port in selected_proxies:
+                        if self.health_check_stop_event.is_set():
+                            break
+                            
+                        try:
+                            session = self.proxy_sessions.get(port)
+                            if session and self._test_proxy_connection(session, port):
+                                with self.lock:
+                                    if port in self.unavailable_proxies:
+                                        self.unavailable_proxies.remove(port)
+                                    if port not in self.available_proxies:
+                                        self.available_proxies.append(port)
+                                logger.info(f"SOCKS5 proxy {port} is back online (background check)")
+                        except Exception as e:
+                            logger.debug(f"Background check: Proxy {port} still unavailable: {e}")
+                  # Периодическая проверка доступных прокси (реже)
+                if len(self.available_proxies) > 0 and not self.health_check_stop_event.is_set():
+                    # Проверяем один случайный доступный прокси раз в минуту
+                    with self.lock:
+                        available_copy = self.available_proxies.copy()
+                    
+                    if available_copy:
+                        random_proxy = random.choice(available_copy)
+                        try:
+                            session = self.proxy_sessions.get(random_proxy)
+                            if session and not self._test_proxy_connection(session, random_proxy):
+                                with self.lock:
+                                    if random_proxy in self.available_proxies:
+                                        self.available_proxies.remove(random_proxy)
+                                    if random_proxy not in self.unavailable_proxies:
+                                        self.unavailable_proxies.append(random_proxy)
+                                logger.warning(f"SOCKS5 proxy {random_proxy} became unavailable (background check)")
+                        except Exception as e:
+                            logger.debug(f"Background check error for proxy {random_proxy}: {e}")
+                
+                # Ждем перед следующей проверкой
+                self.health_check_stop_event.wait(self.health_check_interval)
+                
+            except Exception as e:
+                logger.error(f"Background health checker error: {e}")
+                self.health_check_stop_event.wait(5)  # Короткая пауза при ошибке
+        
+        logger.info("Background proxy health checker stopped")
