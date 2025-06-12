@@ -16,15 +16,14 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'tor-admin-secret-key'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # Инициализируем компоненты
 http_balancer = HTTPLoadBalancer(listen_port=8080)
-tor_manager = TorNetworkManager(socketio, http_balancer)
+#tor_manager = TorNetworkManager(socketio, http_balancer)
 
 # Запускаем мониторинг
-tor_manager.start_monitoring()
+#tor_manager.start_monitoring()
 
 def _handle_service_operation(operation_name, operation_func, *args):
     """Helper function to handle service operations"""
@@ -314,16 +313,19 @@ if __name__ == '__main__':
     # Автоматически запускаем HTTP балансировщик при старте
     try:
         http_balancer.start()
+        http_balancer.add_proxy(9150)  # Добавляем порт Tor SOCKS5 прокси
+        time.sleep(1000000)
+
         logger.info(f"HTTP Load Balancer started on port {http_balancer.listen_port}")
     except Exception as e:
         logger.error(f"Failed to start HTTP Load Balancer: {e}")
     
     # Запускаем инфраструктуру Tor Network Manager
     try:
-        tor_manager.start_services()
+        #tor_manager.start_services()
         logger.info("Tor Network Manager infrastructure initialized")
     except Exception as e:
         logger.error(f"Failed to start Tor Network Manager: {e}")
     
     # Запускаем Flask приложение
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
+    #socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)

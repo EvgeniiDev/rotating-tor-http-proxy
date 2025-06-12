@@ -914,15 +914,14 @@
                     style="display: none; padding: 8px; border-radius: 4px; width: 80px;" placeholder="Кол-во">
                 <button class="btn btn-primary" onclick="startSelectedSubnets()">🚀 Запустить выбранные</button>
                 <button class="btn btn-success" onclick="startTopSubnets()">⭐ Запустить топ подсетей</button>
-                <button class="btn btn-danger" onclick="stopAllSubnets()">⏹️ Остановить все</button>
-                <button class="btn btn-warning" onclick="restartAllSubnets()">🔄 Перезапустить все</button>
+                <button class="btn btn-danger" onclick="stopAllSubnets()">⏹️ Остановить все</button> <button
+                    class="btn btn-warning" onclick="restartAllSubnets()">🔄 Перезапустить все</button>
+            </div>
+
+            <div class="subnet-grid" id="subnetContainer">
+                <!-- Subnet items will be populated here -->
             </div>
         </div>
-
-        <div class="subnet-grid" id="subnetContainer">
-            <!-- Subnet items will be populated here -->
-        </div>
-    </div>
     </div>
     <script>
         const socket = io();
@@ -940,7 +939,8 @@
         }
 
         // Call initialization immediately
-        initializeData(); function switchTab(tabName) {
+        initializeData();
+        function switchTab(tabName) {
             // Hide all tab contents
             document.querySelectorAll('.tab-content').forEach(content => {
                 content.classList.remove('active');
