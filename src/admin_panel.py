@@ -155,6 +155,65 @@ def get_balancer_stats():
         return jsonify(create_error_response(f"Failed to get balancer stats: {str(e)}"))
 
 
+@app.route('/api/balancer/top-proxies')
+def get_top_proxies():
+    """Получить топ прокси по различным метрикам"""
+    try:
+        metric = request.args.get('metric', 'performance')
+        limit = int(request.args.get('limit', 10))
+          # Получаем статистику всех прокси
+        if not hasattr(http_balancer, 'stats_manager') or not http_balancer.stats_manager:
+            return jsonify(create_success_response('Top proxies retrieved successfully', {'top_proxies': []}))
+        
+        stats_data = http_balancer.stats_manager.get_all_stats()
+        
+        if not stats_data:
+            return jsonify(create_success_response('Top proxies retrieved successfully', {'top_proxies': []}))
+        
+        # Преобразуем в список для сортировки
+        proxy_list = []
+        for port, stats in stats_data.items():
+            proxy_data = {
+                'port': int(port),
+                'success_rate': stats.get('success_rate', 0),
+                'avg_response_time': stats.get('avg_response_time', 0),
+                'total_requests': stats.get('total_requests', 0),
+                'successful_requests': stats.get('successful_requests', 0),
+                'failed_requests': stats.get('failed_requests', 0),
+                'last_used': stats.get('last_used', 0),
+                'uptime': stats.get('uptime', 0)
+            }
+            
+            # Вычисляем показатель производительности
+            if metric == 'performance':
+                # Комбинированный показатель: успешность минус время ответа
+                proxy_data['score'] = proxy_data['success_rate'] - (proxy_data['avg_response_time'] * 10)
+            elif metric == 'speed':
+                # Чем меньше время ответа, тем лучше (инвертируем)
+                proxy_data['score'] = 1000 - proxy_data['avg_response_time'] if proxy_data['avg_response_time'] > 0 else 0
+            elif metric == 'reliability':
+                # Только по успешности
+                proxy_data['score'] = proxy_data['success_rate']
+            elif metric == 'traffic':
+                # По количеству запросов
+                proxy_data['score'] = proxy_data['total_requests']
+            else:
+                proxy_data['score'] = proxy_data['success_rate']
+            
+            proxy_list.append(proxy_data)
+        
+        # Сортируем по показателю (от лучшего к худшему)
+        proxy_list.sort(key=lambda x: x['score'], reverse=True)
+        
+        # Ограничиваем количество
+        top_proxies = proxy_list[:limit]
+        
+        return jsonify(create_success_response('Top proxies retrieved successfully', {'top_proxies': top_proxies}))
+        
+    except Exception as e:
+        logger.error(f"Error getting top proxies: {e}")
+        return jsonify(create_error_response(f"Failed to get top proxies: {str(e)}"))
+
 
 @app.route('/api/subnet/<subnet>/start', methods=['POST'])
 def start_subnet(subnet):
