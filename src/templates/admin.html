@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tor SOCKS5 Proxy Admin Panel</title>
+    <title>Tor HTTP Proxy Admin Panel</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
     <style>
         * {
@@ -474,6 +474,27 @@
                 <span class="stat-label">⭕ Inactive Subnets</span>
             </div>
         </div>
+        
+        <!-- Proxy Access Information -->
+        <div class="subnets-container" style="margin-bottom: 20px;">
+            <div class="subnets-header">
+                <h3>🌐 Proxy Access</h3>
+            </div>            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; padding: 15px;">
+                <div class="stat-card" style="flex-direction: column; align-items: flex-start; text-align: left;">
+                    <span class="stat-label" style="margin-bottom: 8px;">🌐 HTTP Proxy</span>
+                    <span style="font-family: 'Courier New', monospace; background: rgba(0,0,0,0.3); padding: 5px 10px; border-radius: 4px; font-size: 0.85em;">http://localhost:8080</span>
+                </div>
+                <div class="stat-card" style="flex-direction: column; align-items: flex-start; text-align: left;">
+                    <span class="stat-label" style="margin-bottom: 8px;">📊 HAProxy Stats</span>
+                    <span style="font-family: 'Courier New', monospace; background: rgba(0,0,0,0.3); padding: 5px 10px; border-radius: 4px; font-size: 0.85em;">http://localhost:4444</span>
+                </div>
+                <div class="stat-card" style="flex-direction: column; align-items: flex-start; text-align: left;">
+                    <span class="stat-label" style="margin-bottom: 8px;">🔧 HTTP Converters</span>
+                    <span class="stat-number" id="httpConverters">-</span>
+                </div>
+            </div>
+        </div>
+
         <div class="subnets-container">
             <div class="subnets-header">
                 <h3>Subnet Management</h3>
@@ -587,6 +608,9 @@
                 const inactiveCount = (stats.total_subnets || 0) - (stats.active_subnets || 0);
                 inactiveSubnetsElement.textContent = inactiveCount;
             }
+
+            // Update HTTP converters count
+            updateHttpConvertersStats();
 
             if (stats.last_update) {
                 const date = new Date(stats.last_update);
@@ -942,6 +966,22 @@
 
         socket.on('error', error => showNotification('Server error', 'error'));
         socket.on('connect_error', error => showNotification('Connection error', 'error'));
+
+        function updateHttpConvertersStats() {
+            fetch('/api/polipo/stats')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const httpConvertersElement = document.getElementById('httpConverters');
+                        if (httpConvertersElement) {
+                            httpConvertersElement.textContent = data.stats.running_instances || 0;
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching Polipo stats:', error);
+                });
+        }
     </script>
 </body>
 

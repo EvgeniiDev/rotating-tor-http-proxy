@@ -10,7 +10,7 @@ timeout /t 5 /nobreak > nul
 echo ✅ Services started successfully!
 echo.
 echo 📊 Admin Panel: http://localhost:5000
-echo 🌐 HTTP Proxy: http://localhost:3128
+echo 🌐 HTTP Proxy: http://localhost:8080
 echo 📈 HAProxy Stats: http://localhost:4444/stats
 echo.
 echo 🔍 To view logs: docker-compose logs -f

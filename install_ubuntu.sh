@@ -30,6 +30,11 @@ if ! id -u proxy > /dev/null 2>&1; then
     sudo useradd -r -s /bin/false -g proxy -u 1000 proxy
 fi
 
+
+wget http://archive.ubuntu.com/ubuntu/pool/universe/p/polipo/polipo_1.1.1-8_amd64.deb
+sudo dpkg -i polipo_1.1.1-8_amd64.deb
+
+
 # Set up HAProxy configuration
 echo "Setting up HAProxy configuration..."
 # Remove default HAProxy config and copy our config

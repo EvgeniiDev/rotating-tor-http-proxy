@@ -86,6 +86,19 @@ def get_subnets():
 def get_status():
     return jsonify(tor_manager.get_service_status())
 
+@app.route('/api/polipo/stats')
+def get_polipo_stats():
+    """Get Polipo HTTP converter statistics"""
+    try:
+        stats = tor_manager.polipo_manager.get_stats()
+        return jsonify({
+            'success': True,
+            'stats': stats
+        })
+    except Exception as e:
+        logger.error(f"Error getting Polipo stats: {e}")
+        return jsonify(create_error_response("Failed to get Polipo stats", str(e))), 500
+
 def _handle_service_operation(operation_name, operation_func, *args):
     """Helper function to handle service operations"""
     try:

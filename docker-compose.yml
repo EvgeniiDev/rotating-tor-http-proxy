@@ -1,9 +1,8 @@
 services:
   tor-proxy-admin:
     build: .
-    container_name: tor-proxy-with-admin
-    ports:
-      - "1080:1080"  # SOCKS5 proxy port
+    container_name: tor-proxy-with-admin    ports:
+      - "8080:8080"  # HTTP proxy port
       - "4444:4444"  # HAProxy stats
       - "5000:5000"  # Admin panel
     volumes:

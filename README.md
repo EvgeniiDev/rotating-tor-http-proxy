@@ -1,44 +1,46 @@
 # Rotating Tor HTTP Proxy
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Python](https://img.shields.io/badge/python-3.13+-blue.svg)
 ![Docker](https://img.shields.io/badge/docker-ready-blue.svg)
 
-Высокопроизводительная система ротации Tor-прокси с веб-интерфейсом управления, автоматическим балансированием нагрузки и мониторингом в реальном времени.
+Высокопроизводительная система HTTP-прокси с ротацией Tor-узлов, веб-интерфейсом управления, автоматическим балансированием нагрузки и мониторингом в реальном времени.
 
 ## 🚀 Ключевые возможности
 
 - **Автоматическая ротация IP-адресов** через множественные Tor-узлы
 - **Веб-панель администрирования** с интуитивным интерфейсом
-- **Балансировка нагрузки** через HAProxy
+- **HTTP-only архитектура** с балансировкой нагрузки через HAProxy
+- **HTTP to SOCKS5 конвертация** через Polipo для работы с Tor
 - **Мониторинг в реальном времени** состояния всех сервисов
 - **Географическое распределение** Tor-узлов по странам/подсетям
 - **Docker-контейнеризация** для простого развертывания
-- **SOCKS5 прокси** с высокой производительностью
+- **HTTP-прокси** на порту 8080 с автоматическими health checks
 - **Автоматическое восстановление** неработающих узлов
 
 ## 🏗️ Архитектура системы
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Client Apps   │───▶│    HAProxy       │───▶│   Tor Network   │
-│                 │    │  Load Balancer   │    │   (Multiple     │
-└─────────────────┘    │  (Port 1080)     │    │   Instances)    │
+│   HTTP Clients  │───▶│    HAProxy       │───▶│   Polipo HTTP   │
+│                 │    │  Load Balancer   │    │   Converters    │
+└─────────────────┘    │  (Port 8080)     │    │   (20000+)      │
                        └──────────────────┘    └─────────────────┘
-                                │
-                                ▼
-                       ┌──────────────────┐
-                       │   Admin Panel    │
-                       │   (Port 5000)    │
-                       │  + SocketIO      │
-                       └──────────────────┘
-                                │
-                                ▼
-                       ┌──────────────────┐
-                       │ Tor Network Mgr  │
+                                │                                │                        │
+                                ▼                        ▼
+                       ┌──────────────────┐    ┌─────────────────┐
+                       │   Admin Panel    │    │   Tor Network   │
+                       │   (Port 5000)    │    │   (SOCKS5       │
+                       │  + SocketIO      │    │   10000+)       │
+                       └──────────────────┘    └─────────────────┘
+                                │                        │
+                                ▼                        ▼
+                       ┌──────────────────┐             Internet
+                       │ Tor Network Mgr  │             Resources
                        │ + Config Mgr     │
                        │ + HAProxy Mgr    │
+                       │ + Polipo Mgr     │
                        └──────────────────┘
 ```
 
@@ -141,7 +143,7 @@ run.bat
 |--------|-----|----------|
 | 🎛️ **Админ-панель** | http://localhost:5000 | Основной интерфейс управления |
 | 📊 **HAProxy Stats** | http://localhost:4444 | Статистика балансировщика |
-| 🌐 **SOCKS5 Proxy** | socks5://localhost:1080 | Основной прокси-сервер |
+| 🌐 **HTTP Proxy** | http://localhost:8080 | HTTP прокси-сервер |
 
 ### Веб-интерфейс администрирования
 
@@ -178,32 +180,31 @@ requests.post('http://localhost:5000/api/stop_subnet', json={
 
 ### Использование прокси в приложениях
 
-#### Python с requests
+#### Python с requests (HTTP)
 
 ```python
 import requests
 
 proxies = {
-    'http': 'socks5://localhost:1080',
-    'https': 'socks5://localhost:1080'
+    'http': 'http://localhost:8080',
+    'https': 'http://localhost:8080'
 }
 
 response = requests.get('https://httpbin.org/ip', proxies=proxies)
 print(f"Текущий IP: {response.json()['origin']}")
 ```
 
-#### cURL
+#### cURL (HTTP)
 
 ```bash
-curl --socks5 localhost:1080 https://httpbin.org/ip
+curl --proxy localhost:8080 https://httpbin.org/ip
 ```
 
 #### Браузер (Firefox)
 
 1. Настройки → Сеть → Параметры подключения
 2. Ручная настройка прокси
-3. SOCKS Host: `localhost`, Port: `1080`
-4. SOCKS v5
+3. **HTTP прокси**: `localhost`, Port: `8080`
 
 ## 📊 Мониторинг и диагностика
 
@@ -220,15 +221,15 @@ docker exec -it tor-proxy-with-admin tail -f /var/log/tor/tor.log
 ### Проверка работоспособности
 
 ```bash
-# Проверка SOCKS5 прокси
-python3 steamProxyCheker.py
+# Проверка HTTP прокси
+python test_proxy.py
 
 # Проверка через HAProxy stats
 curl http://localhost:4444/stats
 
 # Проверка смены IP
 for i in {1..5}; do
-    curl --socks5 localhost:1080 https://httpbin.org/ip
+    curl --proxy localhost:8080 https://httpbin.org/ip
     sleep 2
 done
 ```

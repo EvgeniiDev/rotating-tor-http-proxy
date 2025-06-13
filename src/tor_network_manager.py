@@ -8,6 +8,7 @@ from collections import defaultdict
 
 from haproxy_manager import HAProxyManager
 from config_manager import ConfigManager
+from polipo_manager import PolipoManager
 from models import ServiceStatus, get_current_timestamp
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ class TorNetworkManager:
         self.subnet_tor_processes = {}
         self.haproxy_manager = HAProxyManager()
         self.config_manager = ConfigManager()
+        self.polipo_manager = PolipoManager()
         self.next_instance_id = 1
         self.socketio = socketio
         self._subnet_lock = threading.Lock()  # Add thread protection
@@ -108,7 +110,7 @@ class TorNetworkManager:
         return True
 
     def stop_services(self):
-        """Stop all Tor instances"""
+        """Stop all Tor instances and Polipo converters"""
         with self._subnet_lock:
             for process in self.tor_processes.values():
                 if process and process.poll() is None:
@@ -120,6 +122,9 @@ class TorNetworkManager:
                 for process in processes.values():
                     if process and process.poll() is None:
                         process.terminate()
+
+            # Stop all Polipo instances
+            self.polipo_manager.stop_all_instances()
 
             self.tor_processes.clear()
             self.subnet_tor_processes.clear()
@@ -152,8 +157,9 @@ class TorNetworkManager:
         for subnet_key, processes in self.subnet_tor_processes.items():
             for instance_id, process in processes.items():
                 if not (process and process.poll() is None):
-                    failed_instances.append(f"subnet-tor-{instance_id}")
-
+                    failed_instances.append(f"subnet-tor-{instance_id}")        # Get Polipo statistics
+        polipo_stats = self.polipo_manager.get_stats()
+        
         status = ServiceStatus(
             services_started=self.services_started,
             total_instances=len(self.tor_processes) + sum(len(p)
@@ -163,7 +169,11 @@ class TorNetworkManager:
             failed_instances=failed_instances,
             last_check=get_current_timestamp()
         )
-        return status.to_dict()
+        
+        # Add Polipo statistics to the status
+        status_dict = status.to_dict()
+        status_dict['polipo_stats'] = polipo_stats
+        return status_dict
 
     def update_subnet_stats(self):
         """Update subnet statistics"""
@@ -283,7 +293,6 @@ class TorNetworkManager:
                     if not self.monitoring:
                         break
                     time.sleep(1)
-
         monitor_thread = threading.Thread(target=monitor)
         monitor_thread.daemon = True
         monitor_thread.start()
@@ -294,7 +303,7 @@ class TorNetworkManager:
         self.monitoring = False
 
     def _start_tor_instance(self, instance_id, subnet=None):
-        """Start a single Tor instance"""
+        """Start a single Tor instance with Polipo HTTP converter"""
         tor_config_result = self.config_manager.create_tor_config(
             instance_id, subnet)
         tor_cmd = ['tor', '-f', tor_config_result['config_path']]
@@ -302,22 +311,33 @@ class TorNetworkManager:
         logger.info(f"Starting Tor instance {instance_id} for subnet {subnet}")
 
         process = subprocess.Popen(
-            tor_cmd,
-            stdout=subprocess.PIPE,
+            tor_cmd,            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
         )
 
         socks_port = tor_config_result['socks_port']
+        http_port = tor_config_result['http_port']
         
-        if self.haproxy_manager.add_backend_instance_with_check(
-            instance_id, socks_port, max_wait_time=90        ):
-            logger.info(
-                f"Started Tor instance {instance_id} on SOCKS port {socks_port}")
-            return process
+        logger.info(f"Started Tor instance {instance_id} on SOCKS port {socks_port}")
+        
+        # Start Polipo for HTTP proxy functionality
+        polipo_http_port = self.polipo_manager.start_polipo_instance(instance_id, socks_port)
+        
+        if polipo_http_port:
+            # Add to HTTP backend with health check
+            if self.haproxy_manager.add_http_backend_instance(instance_id, polipo_http_port):
+                logger.info(f"Added HTTP proxy for instance {instance_id} on port {polipo_http_port}")
+                return process
+            else:
+                logger.warning(f"Failed to add HTTP backend for instance {instance_id}")
+                # Stop the Polipo instance if HAProxy addition failed
+                self.polipo_manager.stop_polipo_instance(instance_id)
+                if process and process.poll() is None:
+                    process.terminate()
+                return None
         else:
-            logger.error(
-                f"Tor instance {instance_id} failed to add to HAProxy")
+            logger.warning(f"Failed to start Polipo for instance {instance_id}")
             if process and process.poll() is None:
                 process.terminate()
             return None
@@ -364,9 +384,11 @@ class TorNetworkManager:
                 if process and process.poll() is None:
                     process.terminate()
                     logger.info(
-                        f"Stopped Tor instance {instance_id} for subnet {subnet}")
-
-                self.haproxy_manager.remove_backend_instance(instance_id)
+                        f"Stopped Tor instance {instance_id} for subnet {subnet}")                # Remove from HAProxy HTTP backend
+                self.haproxy_manager.remove_http_backend_instance(instance_id)
+                
+                # Stop Polipo instance
+                self.polipo_manager.stop_polipo_instance(instance_id)
 
             del self.subnet_tor_processes[subnet_key]
 

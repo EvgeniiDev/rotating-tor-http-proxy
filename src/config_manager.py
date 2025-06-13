@@ -6,7 +6,12 @@ logger = logging.getLogger(__name__)
 class ConfigManager:
     def __init__(self):
         self.base_tor_socks_port = 10000
-        self.base_tor_ctrl_port = 20000
+        self.base_tor_ctrl_port = 30000
+        self.base_http_port = 20000  # HTTP ports start from 20000 (socks + 10000)
+
+    def get_http_port_for_socks_port(self, socks_port: int) -> int:
+        """Calculate HTTP port based on SOCKS port (difference of 10000)"""
+        return socks_port + 10000
 
     def get_tor_config(self, instance_id: int, socks_port: int, ctrl_port: int,
                        subnet: Optional[str] = None) -> str:
@@ -44,31 +49,14 @@ class ConfigManager:
         return '\n'.join(config_lines)
 
     def get_port_assignment(self, instance_id: int) -> Dict:
-        """
-        Get port assignments for Tor instance
-
-        Args:
-            instance_id: Instance identifier (should be positive integer)
-
-        Returns:
-            Dictionary with port assignments
-        """
+        socks_port = self.base_tor_socks_port + instance_id - 1
         return {
-            'socks_port': self.base_tor_socks_port + instance_id - 1,
-            'ctrl_port': self.base_tor_ctrl_port + instance_id - 1
+            'socks_port': socks_port,
+            'ctrl_port': self.base_tor_ctrl_port + instance_id - 1,
+            'http_port': self.get_http_port_for_socks_port(socks_port)
         }
 
     def create_tor_config(self, instance_id: int, subnet: Optional[str] = None) -> Dict:
-        """
-        Create Tor configuration file
-
-        Args:
-            instance_id: Instance identifier
-            subnet: Subnet filter
-
-        Returns:
-            Dictionary with configuration details
-        """
         ports = self.get_port_assignment(instance_id)
         config_content = self.get_tor_config(
             instance_id,
@@ -85,5 +73,6 @@ class ConfigManager:
         return {
             'config_path': config_path,
             'socks_port': ports['socks_port'],
-            'ctrl_port': ports['ctrl_port']
+            'ctrl_port': ports['ctrl_port'],
+            'http_port': ports['http_port']
         }
