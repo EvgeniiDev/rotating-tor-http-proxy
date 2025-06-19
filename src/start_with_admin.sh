@@ -13,7 +13,7 @@ function log() {
 
 # Start admin panel with HTTP balancer in background
 log "Starting Tor HTTP Proxy Admin Panel with integrated load balancer..."
-python3 admin_panel.py &
+python3 start_new.py &
 ADMIN_PANEL_PID=$!
 
 # Function to handle shutdown
