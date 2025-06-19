@@ -100,11 +100,6 @@
             text-align: center;
         }
 
-        .stat-card.balancer {
-            background: rgba(76, 175, 80, 0.2);
-            border-color: rgba(76, 175, 80, 0.3);
-        }
-
         .stat-card.error {
             background: rgba(244, 67, 54, 0.2);
             border-color: rgba(244, 67, 54, 0.3);
@@ -180,20 +175,6 @@
             opacity: 0.6;
             cursor: not-allowed;
             transform: none;
-        }
-
-        .balancer-stats {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 15px;
-        }
-
-        .balancer-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
         }
 
         .proxy-list {
@@ -785,89 +766,14 @@
     <div class="container">
         <div class="header">
             <h1>Tor HTTP Proxy Admin Panel <span class="status-indicator" id="connectionStatus"></span></h1>
-            <p>Управление Tor сетью и HTTP балансировщиком</p>
+            <p>Управление Tor сетью</p>
         </div>
         <div class="tabs">
-            <button class="tab active" onclick="switchTab('balancer')">HTTP Балансировщик</button>
-            <button class="tab" onclick="switchTab('subnets')">Подсети</button>
-        </div> <!-- Balancer Tab -->
-        <div id="balancer" class="tab-content active">
-            <div class="balancer-stats">
-                <div class="balancer-header">
-                    <h3>HTTP Load Balancer Status</h3>
-                </div> <!-- Основная статистика -->
-                <div class="stats-grid">
-                    <div class="stat-card balancer">
-                        <span class="stat-number" id="balancerStatus">Неизвестно</span>
-                        <span class="stat-label">Статус</span>
-                    </div>
-                    <div class="stat-card">
-                        <span class="stat-number" id="listenPort">8080</span>
-                        <span class="stat-label">Порт прослушивания</span>
-                    </div>
-                    <div class="stat-card success">
-                        <span class="stat-number" id="totalProxies">0</span>
-                        <span class="stat-label">Всего прокси</span>
-                    </div>
-                    <div class="stat-card success">
-                        <span class="stat-number" id="availableProxies">0</span>
-                        <span class="stat-label">Доступных</span>
-                    </div>
-                    <div class="stat-card error">
-                        <span class="stat-number" id="unavailableProxies">0</span>
-                        <span class="stat-label">Недоступных</span>
-                    </div>
-                </div>
-
-                <!-- Упрощенная статистика производительности -->
-                <div class="performance-stats">
-                    <h4>Общая статистика запросов</h4>
-                    <div class="stats-grid">
-                        <div class="stat-card">
-                            <span class="stat-number" id="totalRequests">0</span>
-                            <span class="stat-label">Всего запросов</span>
-                        </div>
-                        <div class="stat-card success">
-                            <span class="stat-number" id="successfulRequests">0</span>
-                            <span class="stat-label">Успешных</span>
-                        </div>
-                        <div class="stat-card error">
-                            <span class="stat-number" id="failedRequests">0</span>
-                            <span class="stat-label">Неудачных</span>
-                        </div>
-                        <div class="stat-card">
-                            <span class="stat-number" id="successRate">0%</span>
-                            <span class="stat-label">Успешность</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Топ прокси -->
-                <div class="top-proxies">
-                    <div class="section-header">
-                        <h4>Топ прокси</h4>
-                        <select id="metricSelect" onchange="changeMetric()" style="padding: 5px; border-radius: 4px;">
-                            <option value="performance">По производительности</option>
-                            <option value="speed">По скорости</option>
-                            <option value="reliability">По надежности</option>
-                            <option value="traffic">По трафику</option>
-                        </select>
-                    </div>
-                    <div id="topProxiesList" class="top-proxies-list">
-                        <!-- Top proxies will be populated here -->
-                    </div>
-                </div>
-
-                <!-- Детальная статистика по прокси -->
-                <div class="proxy-detailed-stats">
-                    <h4>Детальная статистика прокси</h4>
-                    <div id="proxyDetailedList" class="proxy-list">
-                        <!-- Detailed proxy stats will be populated here -->
-                    </div>
-                </div>
-            </div>
-        </div> <!-- Subnets Tab -->
-        <div id="subnets" class="tab-content">
+            <button class="tab active" onclick="switchTab('subnets')">Подсети</button>
+        </div>
+        
+        <!-- Subnets Tab -->
+        <div id="subnets" class="tab-content active">
             <!-- Статистика подсетей -->
             <div class="subnets-stats" style="margin-bottom: 20px;">
                 <h3>Статистика подсетей</h3>
@@ -926,15 +832,11 @@
     <script>
         const socket = io();
         let subnetsData = [];
-        let balancerData = {};
 
         // Initialize with safe defaults
         function initializeData() {
             if (!Array.isArray(subnetsData)) {
                 subnetsData = [];
-            }
-            if (typeof balancerData !== 'object' || balancerData === null) {
-                balancerData = {};
             }
         }
 
@@ -954,9 +856,7 @@
             event.target.classList.add('active');
 
             // Refresh data for the selected tab
-            if (tabName === 'balancer') {
-                refreshBalancerData();
-            } else if (tabName === 'subnets') {
+            if (tabName === 'subnets') {
                 refreshSubnets();
                 updateSubnetStats();
             }
@@ -999,294 +899,9 @@
                     console.error('Error refreshing subnets:', error);
                     subnetsData = [];
                 });
-        } function refreshBalancerData() {
-            fetch('/api/balancer/stats')
-                .then(response => response.json()).then(data => {
-                    if (data.success) {
-                        balancerData = data.stats;
-                        renderBalancerStats();
-                    } else {
-                        console.error('Failed to refresh balancer data:', data.error || 'Unknown error');
-                    }
-                })
-                .catch(error => {
-                    console.error('Failed to refresh balancer data:', error);
-                });
-
-            // Also fetch top proxies
-            const selectedMetric = document.getElementById('metricSelect')?.value || 'performance';
-            fetch(`/api/balancer/top-proxies?metric=${selectedMetric}&limit=10`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success && data.data && data.data.top_proxies) {
-                        renderTopProxies(data.data.top_proxies);
-                    } else {
-                        console.warn('No top proxies data available');
-                        renderTopProxies([]);
-                    }
-                })
-                .catch(error => {
-                    console.error('Failed to fetch top proxies:', error);
-                    renderTopProxies([]);
-                });
-        } function renderBalancerStats() {
-            if (!balancerData) return;
-
-            // Основная статистика
-            document.getElementById('balancerStatus').textContent =
-                balancerData.running ? 'Работает' : 'Остановлен';
-            document.getElementById('listenPort').textContent = balancerData.listen_port || 8080;
-            document.getElementById('totalProxies').textContent = balancerData.total_proxies || 0;
-            document.getElementById('availableProxies').textContent = balancerData.available_proxies || 0;
-            document.getElementById('unavailableProxies').textContent = balancerData.unavailable_proxies || 0;            // Упрощенная общая статистика
-            const summary = balancerData.summary_stats || {};
-            const totalRequestsEl = document.getElementById('totalRequests');
-            const successfulRequestsEl = document.getElementById('successfulRequests');
-            const failedRequestsEl = document.getElementById('failedRequests');
-            const successRateEl = document.getElementById('successRate');
-
-            if (totalRequestsEl) totalRequestsEl.textContent = summary.total_requests || 0;
-            if (successfulRequestsEl) successfulRequestsEl.textContent = summary.successful_requests || 0;
-            if (failedRequestsEl) failedRequestsEl.textContent = summary.failed_requests || 0;
-            if (successRateEl) successRateEl.textContent = `${summary.overall_success_rate || 0}%`;
-
-            renderProxyDetailedList();
         }
 
-        function renderProxyDetailedList() {
-            const container = document.getElementById('proxyDetailedList');
-            if (!container) return;
-
-            container.innerHTML = '';
-
-            if (!balancerData.proxy_stats || Object.keys(balancerData.proxy_stats).length === 0) {
-                container.innerHTML = '<p>Нет данных о прокси</p>';
-                return;
-            }
-
-            // Сортируем прокси по производительности
-            const proxies = Object.entries(balancerData.proxy_stats).sort((a, b) => {
-                const scoreA = a[1].success_rate - (a[1].avg_response_time * 100);
-                const scoreB = b[1].success_rate - (b[1].avg_response_time * 100);
-                return scoreB - scoreA;
-            }); proxies.forEach(([port, stats]) => {
-                const isUnavailable = balancerData.unavailable_proxy_ports &&
-                    balancerData.unavailable_proxy_ports.includes(parseInt(port));
-
-                const proxyItem = document.createElement('div');
-                proxyItem.className = `proxy-item ${isUnavailable ? 'unavailable' : ''}`;
-
-                // Определяем health status на основе упрощенной статистики
-                let healthClass = 'healthy';
-                let statusText = '✅ Активен';
-
-                if (isUnavailable) {
-                    healthClass = 'critical';
-                    statusText = '❌ Недоступен';
-                } else if (stats.success_rate < 50) {
-                    healthClass = 'critical';
-                    statusText = '🔴 Критично';
-                } else if (stats.success_rate < 80) {
-                    healthClass = 'warning';
-                    statusText = '🟡 Предупреждение';
-                } else {
-                    healthClass = 'healthy';
-                    statusText = '✅ Хорошо';
-                }
-
-                proxyItem.innerHTML = `
-                    <div class="proxy-header">
-                        <span class="proxy-port">SOCKS5 :${port}</span>
-                        <span class="health-indicator ${healthClass}">${statusText}</span>
-                    </div>
-                    <div class="proxy-stats-grid">
-                        <div class="proxy-stat">
-                            <span>Всего запросов:</span>
-                            <span>${stats.total_requests || 0}</span>
-                        </div>
-                        <div class="proxy-stat">
-                            <span>Успешных:</span>
-                            <span class="success">${stats.successful_requests || 0}</span>
-                        </div>
-                        <div class="proxy-stat">
-                            <span>Неудачных:</span>
-                            <span class="error">${stats.failed_requests || 0}</span>
-                        </div>
-                        <div class="proxy-stat">
-                            <span>Успешность:</span>
-                            <span class="${stats.success_rate >= 80 ? 'success' : stats.success_rate >= 50 ? 'warning' : 'error'}">${stats.success_rate || 0}%</span>
-                        </div>
-                        <div class="proxy-stat">
-                            <span>Время работы:</span>
-                            <span>${formatUptime(stats.uptime_seconds || 0)}</span>
-                        </div>
-                        <div class="proxy-stat">
-                            <span>Последний запрос:</span>
-                            <span>${stats.last_request_time ? timeAgo(stats.last_request_time) : 'Никогда'}</span>
-                        </div>
-                    </div>
-                    <div class="proxy-actions">
-                        <button class="btn btn-small btn-info" onclick="showProxyDetails(${port})">📊 Детали</button>
-                    </div>
-                `;
-                container.appendChild(proxyItem);
-            });
-        }
-
-        function renderTopProxies(topProxies) {
-            const container = document.getElementById('topProxiesList');
-            if (!container) return;
-
-            container.innerHTML = '';
-
-            if (!topProxies || topProxies.length === 0) {
-                container.innerHTML = '<p>Нет данных о топ прокси</p>';
-                return;
-            } topProxies.forEach((proxy, index) => {
-                const item = document.createElement('div');
-                item.className = 'top-proxy-item';
-
-                // Ensure numeric values are valid
-                const successRate = Number(proxy.success_rate) || 0;
-                const avgResponseTime = Number(proxy.avg_response_time) || 0;
-                const requestsLastMinute = Number(proxy.requests_last_minute) || 0;
-                const score = Number(proxy.score) || 0;
-                const port = Number(proxy.port) || 0;
-
-                let statusClass = 'success';
-                if (successRate < 70) statusClass = 'error';
-                else if (successRate < 90) statusClass = 'warning';
-
-                item.innerHTML = `
-                    <div class="rank">#${index + 1}</div>
-                    <div class="proxy-info">
-                        <span class="port">:${port}</span>
-                        <div class="metrics">
-                            <span class="${statusClass}">${successRate.toFixed(1)}% успех</span>
-                            <span>${(avgResponseTime * 1000).toFixed(0)}ms</span>
-                            <span>${requestsLastMinute} req/min</span>
-                        </div>
-                    </div>
-                    <div class="score">${score.toFixed(1)}</div>
-                `;
-
-                container.appendChild(item);
-            });
-        }
-
-        function changeMetric() {
-            refreshBalancerData();
-        } function showProxyDetails(port) {
-            // В текущем API нет эндпоинта для получения детальной информации по конкретному прокси
-            // Показываем основную информацию из уже загруженных данных
-            if (balancerData && balancerData.proxy_stats && balancerData.proxy_stats[port]) {
-                const stats = balancerData.proxy_stats[port];
-                showProxyModal(stats, port);
-            } else {
-                showNotification(`Нет данных для прокси :${port}`, 'warning');
-            }
-        }
-
-        function showProxyModal(stats) {
-            // Create modal with detailed proxy statistics
-            const modal = document.createElement('div');
-            modal.className = 'modal';
-            modal.innerHTML = `
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h3>Детальная статистика прокси :${stats.port}</h3>
-                        <span class="close" onclick="closeModal()">&times;</span>
-                    </div>
-                    <div class="modal-body">
-                        <div class="stats-grid">
-                            <div class="stat-item">
-                                <label>Всего запросов:</label>
-                                <span>${stats.total_requests}</span>
-                            </div>
-                            <div class="stat-item">
-                                <label>Успешных:</label>
-                                <span>${stats.successful_requests}</span>
-                            </div>
-                            <div class="stat-item">
-                                <label>Неудачных:</label>
-                                <span>${stats.failed_requests}</span>
-                            </div>
-                            <div class="stat-item">
-                                <label>Общая успешность:</label>
-                                <span>${stats.success_rate}%</span>
-                            </div>
-                            <div class="stat-item">
-                                <label>Успешность (последние):</label>
-                                <span>${stats.recent_success_rate}%</span>
-                            </div>
-                            <div class="stat-item">
-                                <label>Среднее время ответа:</label>
-                                <span>${(stats.avg_response_time * 1000).toFixed(2)}ms</span>
-                            </div>
-                            <div class="stat-item">
-                                <label>Время ответа (последние):</label>
-                                <span>${(stats.recent_avg_response_time * 1000).toFixed(2)}ms</span>
-                            </div>
-                            <div class="stat-item">
-                                <label>Min время ответа:</label>
-                                <span>${(stats.min_response_time * 1000).toFixed(2)}ms</span>
-                            </div>
-                            <div class="stat-item">
-                                <label>Max время ответа:</label>
-                                <span>${(stats.max_response_time * 1000).toFixed(2)}ms</span>
-                            </div>
-                            <div class="stat-item">
-                                <label>Запросов в минуту:</label>
-                                <span>${stats.requests_per_minute}</span>
-                            </div>
-                            <div class="stat-item">
-                                <label>Время работы:</label>
-                                <span>${formatUptime(stats.uptime)}</span>
-                            </div>
-                            <div class="stat-item">
-                                <label>Последний запрос:</label>
-                                <span>${stats.last_request_time ? timeAgo(stats.last_request_time) : 'Никогда'}</span>
-                            </div>
-                        </div>
-                        ${stats.status_codes && Object.keys(stats.status_codes).length > 0 ? `
-                            <h4>Коды ответов:</h4>
-                            <div class="status-codes">
-                                ${Object.entries(stats.status_codes).map(([code, count]) =>
-                `<span class="status-code">${code}: ${count}</span>`
-            ).join('')}
-                            </div>
-                        ` : ''}
-                    </div>
-                </div>
-            `;
-
-            document.body.appendChild(modal);
-            modal.style.display = 'block';
-        }
-
-        function closeModal() {
-            const modal = document.querySelector('.modal');
-            if (modal) {
-                modal.remove();
-            }
-        }
-
-        function formatUptime(seconds) {
-            if (seconds < 60) return `${Math.floor(seconds)}s`;
-            if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-            if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
-            return `${Math.floor(seconds / 86400)}d`;
-        }
-
-        function timeAgo(timestamp) {
-            const now = Date.now() / 1000;
-            const diff = now - timestamp;
-
-            if (diff < 60) return `${Math.floor(diff)}s назад`;
-            if (diff < 3600) return `${Math.floor(diff / 60)}m назад`;
-            if (diff < 86400) return `${Math.floor(diff / 3600)}h назад`;
-            return `${Math.floor(diff / 86400)}d назад`;
-        }        // Функция обновления статистики подсетей
+        // Функция обновления статистики подсетей
         function updateSubnetStats() {
             // Статистика подсетей
             if (subnetsData && Array.isArray(subnetsData)) {
@@ -1825,7 +1440,6 @@
 
         // Функции для глобального управления всеми сервисами
         function refreshAllData() {
-            refreshBalancerData();
             refreshSubnets();
             updateSubnetStats();
         }

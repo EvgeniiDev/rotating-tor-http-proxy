@@ -10,7 +10,7 @@ sudo apt update
 
 # Install system dependencies
 echo "Installing system dependencies..."
-sudo apt install -y python3 python3-pip tor socat haproxy privoxy
+sudo apt install -y python3 python3-pip tor
 
 # Install Python packages
 echo "Installing Python dependencies..."
@@ -46,20 +46,23 @@ sudo chown -R proxy:proxy /home/proxy/tmp
 
 # Make scripts executable
 echo "Making scripts executable..."
-if [ -f "src/start_with_admin.sh" ]; then
-    chmod +x src/start_with_admin.sh
+if [ -f "start_new.py" ]; then
+    chmod +x start_new.py
 fi
 
-if [ -f "src/admin_panel.py" ]; then
-    chmod +x src/admin_panel.py
+if [ -f "src/start_with_admin.sh" ]; then
+    chmod +x src/start_with_admin.sh
 fi
 
 # Script installation completed
 echo "Installation completed successfully!"
 echo ""
-echo "To run the application:"
+echo "To run the application with new architecture:"
+echo "python3 start_new.py"
+echo ""
+echo "Alternatively, to run with legacy start script:"
 echo "cd src && sudo -u proxy ./start_with_admin.sh"
 echo ""
 echo "The following ports will be exposed:"
-echo "- 1080/tcp: SOCKS proxy"
-echo "- 5000/tcp: Admin panel"
+echo "- 5000/tcp: Admin panel web interface"
+echo "- 8080/tcp: HTTP proxy (if load balancer is enabled)"
