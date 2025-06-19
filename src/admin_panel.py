@@ -3,11 +3,8 @@ import time
 import signal
 import logging
 from collections import defaultdict
-from flask import Flask, render_template, request, jsonify
-from flask_socketio import SocketIO
+from flask import render_template, request, jsonify
 
-from tor_network_manager import TorNetworkManager
-from http_load_balancer import HTTPLoadBalancer
 from models import (
     SubnetData, get_current_timestamp, create_success_response, create_error_response
 )
@@ -15,300 +12,181 @@ from models import (
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
-# Инициализируем компоненты
-http_balancer = HTTPLoadBalancer(listen_port=8080)
-tor_manager = TorNetworkManager(socketio, http_balancer)
-
-# Запускаем мониторинг
-tor_manager.start_monitoring()
-
-def _handle_service_operation(operation_name, operation_func, *args):
-    """Helper function to handle service operations"""
-    try:
-        success = operation_func(*args)
-        if success:
-            return jsonify(create_success_response(f'{operation_name} successful'))
-        else:
-            return jsonify(create_error_response(f'{operation_name} failed'))
-    except Exception as e:
-        logger.error(f"Error in {operation_name}: {e}")
-        return jsonify(create_error_response(operation_name, str(e))), 500
-
-
-
-@app.route('/')
-def index():
-    return render_template('admin.html')
-
-def _create_subnet_data(subnet_counts):
-    """Helper function to create subnet data"""
-    subnet_data_list = []
-    for subnet, count in sorted(subnet_counts.items(), key=lambda x: x[1], reverse=True):
-        status = 'active' if subnet in tor_manager.active_subnets else 'available'
-        limit = tor_manager.subnet_limits.get(subnet, 1)
+class AdminPanel:
+    def __init__(self, app, socketio, http_balancer, tor_manager):
+        """Инициализация админ-панели с внешними зависимостями"""
+        self.app = app
+        self.socketio = socketio
+        self.http_balancer = http_balancer
+        self.tor_manager = tor_manager
         
-        # Use thread-safe method to get running instances
-        running_instances = tor_manager.get_subnet_running_instances(subnet)
-
-        subnet_data = SubnetData(
-            subnet=subnet,
-            count=count,
-            status=status,
-            limit=limit,
-            running_instances=running_instances,
-            last_updated=get_current_timestamp()
-        )
-        subnet_data_list.append(subnet_data.to_dict())
-    return subnet_data_list
-
-
-@app.route('/api/subnets')
-def get_subnets():
-    if not tor_manager.current_relays:
-        relay_data = tor_manager.fetch_tor_relays()
-        if relay_data:
-            tor_manager.current_relays = tor_manager.extract_relay_ips(relay_data)
-
-    subnet_counts = defaultdict(int)
-    for relay in tor_manager.current_relays or []:
-        ip_parts = relay['ip'].split('.')
-        if len(ip_parts) >= 2:
-            subnet = f"{ip_parts[0]}.{ip_parts[1]}"
-            subnet_counts[subnet] += 1
-
-    subnet_data_list = _create_subnet_data(subnet_counts)
-
-    # Update stats with new calculations
-    tor_manager.update_subnet_stats()
-
-    return jsonify({
-        'success': True,
-        'subnets': subnet_data_list,
-        'stats': {
-            'active_subnets': tor_manager.stats.get('active_subnets', 0),
-            'blocked_subnets': tor_manager.stats.get('blocked_subnets', 0),
-            'occupied_subnets': tor_manager.stats.get('occupied_subnets', 0),
-            'free_subnets': tor_manager.stats.get('free_subnets', 0),
-            'total_subnets': tor_manager.stats.get('total_subnets', len(subnet_counts)),
-            'tor_instances': len(tor_manager.tor_processes),
-            'running_instances': tor_manager.stats.get('running_instances', 0),
-            'last_update': tor_manager.stats.get('last_update')
-        }
-    })
-
-@app.route('/api/status')
-def get_status():
-    tor_status = tor_manager.get_service_status()
-    balancer_stats = http_balancer.get_stats()
+        # Регистрируем маршруты
+        self._register_routes()
     
-    return jsonify({
-        'tor_network': tor_status,
-        'http_balancer': {
-            'running': http_balancer.server_thread and http_balancer.server_thread.is_alive(),
-            'listen_port': http_balancer.listen_port,
-            'stats': balancer_stats
-        }
-    })
-
-@app.route('/api/balancer/stats')
-def get_balancer_stats():
-    """Получить подробную статистику HTTP балансировщика"""
-    try:
-        balancer_running = http_balancer.server_thread and http_balancer.server_thread.is_alive()
-        
-        # Получаем общую статистику балансировщика
-        balancer_stats = http_balancer.get_stats()
-        
-        # Получаем упрощенную статистику всех прокси
-        stats_data = http_balancer.stats_manager.get_all_stats()
-        
-        # Получаем summary статистику
-        summary_stats = http_balancer.stats_manager.get_summary_stats()
-        
-        response_data = {
-            'success': True,
-            'stats': {
-                'running': balancer_running,
-                'listen_port': http_balancer.listen_port,
-                'total_proxies': balancer_stats.get('total_proxies', 0),
-                'available_proxies': balancer_stats.get('available_proxies', 0),
-                'unavailable_proxies': balancer_stats.get('unavailable_proxies', 0),
-                'available_proxy_ports': balancer_stats.get('available_proxy_ports', []),
-                'unavailable_proxy_ports': balancer_stats.get('unavailable_proxy_ports', []),
-                'current_index': balancer_stats.get('current_index', 0),
-                
-                # Упрощенная статистика прокси                'proxy_stats': stats_data,
-                
-                # Общая статистика
-                'summary_stats': summary_stats
-            }
-        }
-        
-        return jsonify(response_data)
-        
-    except Exception as e:
-        logger.error(f"Error getting balancer stats: {e}")
-        return jsonify(create_error_response(f"Failed to get balancer stats: {str(e)}"))
-
-
-@app.route('/api/balancer/top-proxies')
-def get_top_proxies():
-    """Получить топ прокси по различным метрикам"""
-    try:
-        metric = request.args.get('metric', 'performance')
-        limit = int(request.args.get('limit', 10))
-          # Получаем статистику всех прокси
-        if not hasattr(http_balancer, 'stats_manager') or not http_balancer.stats_manager:
-            return jsonify(create_success_response('Top proxies retrieved successfully', {'top_proxies': []}))
-        
-        stats_data = http_balancer.stats_manager.get_all_stats()
-        
-        if not stats_data:
-            return jsonify(create_success_response('Top proxies retrieved successfully', {'top_proxies': []}))
-        
-        # Преобразуем в список для сортировки
-        proxy_list = []
-        for port, stats in stats_data.items():
-            proxy_data = {
-                'port': int(port),
-                'success_rate': stats.get('success_rate', 0),
-                'avg_response_time': stats.get('avg_response_time', 0),
-                'total_requests': stats.get('total_requests', 0),
-                'successful_requests': stats.get('successful_requests', 0),
-                'failed_requests': stats.get('failed_requests', 0),
-                'last_used': stats.get('last_used', 0),
-                'uptime': stats.get('uptime', 0)
-            }
-            
-            # Вычисляем показатель производительности
-            if metric == 'performance':
-                # Комбинированный показатель: успешность минус время ответа
-                proxy_data['score'] = proxy_data['success_rate'] - (proxy_data['avg_response_time'] * 10)
-            elif metric == 'speed':
-                # Чем меньше время ответа, тем лучше (инвертируем)
-                proxy_data['score'] = 1000 - proxy_data['avg_response_time'] if proxy_data['avg_response_time'] > 0 else 0
-            elif metric == 'reliability':
-                # Только по успешности
-                proxy_data['score'] = proxy_data['success_rate']
-            elif metric == 'traffic':
-                # По количеству запросов
-                proxy_data['score'] = proxy_data['total_requests']
+    def _register_routes(self):
+        """Регистрация всех маршрутов"""
+        self.app.route('/')(self.index)
+        self.app.route('/api/subnets')(self.get_subnets)
+        self.app.route('/api/status')(self.get_status)
+        self.app.route('/api/subnet/<subnet>/start', methods=['POST'])(self.start_subnet)
+        self.app.route('/api/subnet/<subnet>/stop', methods=['POST'])(self.stop_subnet)
+        self.app.route('/api/subnet/<subnet>/limit', methods=['PUT'])(self.set_subnet_limit)
+        self.app.route('/api/subnet/<subnet>/instances', methods=['PUT'])(self.set_subnet_instances)
+        self.app.route('/api/stats/comprehensive')(self.get_comprehensive_stats)
+    
+    def _handle_service_operation(self, operation_name, operation_func, *args):
+        """Обработчик операций с сервисами"""
+        try:
+            success = operation_func(*args)
+            if success:
+                return jsonify(create_success_response(f'{operation_name} successful'))
             else:
-                proxy_data['score'] = proxy_data['success_rate']
+                return jsonify(create_error_response(f'{operation_name} failed'))
+        except Exception as e:
+            logger.error(f"Error in {operation_name}: {e}")
+            return jsonify(create_error_response(operation_name, str(e))), 500
+    
+    def _create_subnet_data(self, subnet_counts):
+        """Создание данных о подсетях"""
+        subnet_data_list = []
+        for subnet, count in sorted(subnet_counts.items(), key=lambda x: x[1], reverse=True):
+            status = 'active' if subnet in self.tor_manager.active_subnets else 'available'
+            limit = self.tor_manager.subnet_limits.get(subnet, 1)
             
-            proxy_list.append(proxy_data)
+            # Use thread-safe method to get running instances
+            running_instances = self.tor_manager.get_subnet_running_instances(subnet)
+
+            subnet_data = SubnetData(
+                subnet=subnet,
+                count=count,
+                status=status,
+                limit=limit,
+                running_instances=running_instances,
+                last_updated=get_current_timestamp()
+            )
+            subnet_data_list.append(subnet_data.to_dict())
+        return subnet_data_list
+
+    def index(self):
+        """Главная страница"""
+        return render_template('admin.html')
+
+    def get_subnets(self):
+        """Получение списка подсетей"""
+        if not self.tor_manager.current_relays:
+            relay_data = self.tor_manager.fetch_tor_relays()
+            if relay_data:
+                self.tor_manager.current_relays = self.tor_manager.extract_relay_ips(relay_data)
+
+        subnet_counts = defaultdict(int)
+        for relay in self.tor_manager.current_relays or []:
+            ip_parts = relay['ip'].split('.')
+            if len(ip_parts) >= 2:
+                subnet = f"{ip_parts[0]}.{ip_parts[1]}"
+                subnet_counts[subnet] += 1
+
+        subnet_data_list = self._create_subnet_data(subnet_counts)
+
+        # Update stats with new calculations
+        self.tor_manager.update_subnet_stats()
+
+        return jsonify({
+            'success': True,
+            'subnets': subnet_data_list,
+            'stats': {
+                'active_subnets': self.tor_manager.stats.get('active_subnets', 0),
+                'blocked_subnets': self.tor_manager.stats.get('blocked_subnets', 0),
+                'occupied_subnets': self.tor_manager.stats.get('occupied_subnets', 0),
+                'free_subnets': self.tor_manager.stats.get('free_subnets', 0),
+                'total_subnets': self.tor_manager.stats.get('total_subnets', len(subnet_counts)),
+                'tor_instances': len(self.tor_manager.tor_processes),
+                'running_instances': self.tor_manager.stats.get('running_instances', 0),
+                'last_update': self.tor_manager.stats.get('last_update')
+            }
+        })
+
+    def get_status(self):
+        """Получение статуса сервисов"""
+        tor_status = self.tor_manager.get_service_status()
         
-        # Сортируем по показателю (от лучшего к худшему)
-        proxy_list.sort(key=lambda x: x['score'], reverse=True)
+        return jsonify({
+            'tor_network': tor_status
+        })
+
+    def start_subnet(self, subnet):
+        """Запуск подсети"""
+        data = request.get_json() or {}
+        instances_count = data.get('instances', 1)
         
-        # Ограничиваем количество
-        top_proxies = proxy_list[:limit]
+        def start_and_update():
+            result = self.tor_manager.start_subnet_tor(subnet, instances_count)
+            return result
         
-        return jsonify(create_success_response('Top proxies retrieved successfully', {'top_proxies': top_proxies}))
+        return self._handle_service_operation(
+            f"Start subnet {subnet}",
+            start_and_update
+        )
+
+    def stop_subnet(self, subnet):
+        """Остановка подсети"""
+        def stop_and_update():
+            result = self.tor_manager.stop_subnet_tor(subnet)
+            return result
         
-    except Exception as e:
-        logger.error(f"Error getting top proxies: {e}")
-        return jsonify(create_error_response(f"Failed to get top proxies: {str(e)}"))
+        return self._handle_service_operation(
+            f"Stop subnet {subnet}",
+            stop_and_update
+        )
 
+    def set_subnet_limit(self, subnet):
+        """Установка лимита для подсети"""
+        data = request.get_json()
+        if not data or 'limit' not in data:
+            return jsonify(create_error_response('Limit value is required')), 400
 
-@app.route('/api/subnet/<subnet>/start', methods=['POST'])
-def start_subnet(subnet):
-    data = request.get_json() or {}
-    instances_count = data.get('instances', 1)
-    
-    def start_and_update():
-        result = tor_manager.start_subnet_tor(subnet, instances_count)
-        return result
-    
-    return _handle_service_operation(
-        f"Start subnet {subnet}",
-        start_and_update
-    )
+        limit = data['limit']
+        if not isinstance(limit, int) or limit < 1:
+            return jsonify(create_error_response('Limit must be a positive integer')), 400
 
-@app.route('/api/subnet/<subnet>/stop', methods=['POST'])
-def stop_subnet(subnet):
-    def stop_and_update():
-        result = tor_manager.stop_subnet_tor(subnet)
-        return result
-    
-    return _handle_service_operation(
-        f"Stop subnet {subnet}",
-        stop_and_update
-    )
+        self.tor_manager.subnet_limits[subnet] = limit
+        return jsonify(create_success_response(f'Set limit for subnet {subnet} to {limit} instances'))
 
-@app.route('/api/subnet/<subnet>/limit', methods=['PUT'])
-def set_subnet_limit(subnet):
-    data = request.get_json()
-    if not data or 'limit' not in data:
-        return jsonify(create_error_response('Limit value is required')), 400
+    def set_subnet_instances(self, subnet):
+        """Установка количества экземпляров для подсети"""
+        data = request.get_json()
+        if not data or 'instances' not in data:
+            return jsonify(create_error_response('Instances value is required')), 400
 
-    limit = data['limit']
-    if not isinstance(limit, int) or limit < 1:
-        return jsonify(create_error_response('Limit must be a positive integer')), 400
+        instances = data['instances']
+        if not isinstance(instances, int) or instances < 0:
+            return jsonify(create_error_response('Instances must be a non-negative integer')), 400
 
-    tor_manager.subnet_limits[subnet] = limit
-    return jsonify(create_success_response(f'Set limit for subnet {subnet} to {limit} instances'))
+        limit = self.tor_manager.subnet_limits.get(subnet, 10)
+        if instances > limit:
+            return jsonify(create_error_response(f'Instances count ({instances}) exceeds limit ({limit})')), 400
 
-@app.route('/api/subnet/<subnet>/instances', methods=['PUT'])
-def set_subnet_instances(subnet):
-    data = request.get_json()
-    if not data or 'instances' not in data:
-        return jsonify(create_error_response('Instances value is required')), 400
+        def set_instances_and_update():
+            if instances == 0:
+                result = self.tor_manager.stop_subnet_tor(subnet)
+            else:
+                self.tor_manager.stop_subnet_tor(subnet)
+                result = self.tor_manager.start_subnet_tor(subnet, instances)
+        
+            return result
 
-    instances = data['instances']
-    if not isinstance(instances, int) or instances < 0:
-        return jsonify(create_error_response('Instances must be a non-negative integer')), 400
-
-    limit = tor_manager.subnet_limits.get(subnet, 10)
-    if instances > limit:
-        return jsonify(create_error_response(f'Instances count ({instances}) exceeds limit ({limit})')), 400
-
-    def set_instances_and_update():
-        if instances == 0:
-            result = tor_manager.stop_subnet_tor(subnet)
+        success = set_instances_and_update()
+        if success:
+            message = f'Stopped all instances for subnet {subnet}' if instances == 0 else f'Set {instances} instances for subnet {subnet}'
+            return jsonify(create_success_response(message))
         else:
-            tor_manager.stop_subnet_tor(subnet)
-            result = tor_manager.start_subnet_tor(subnet, instances)
-    
-        return result
+            return jsonify(create_error_response(f'Failed to set instances for subnet {subnet}'))
 
-    success = set_instances_and_update()
-    if success:
-        message = f'Stopped all instances for subnet {subnet}' if instances == 0 else f'Set {instances} instances for subnet {subnet}'
-        return jsonify(create_success_response(message))
-    else:
-        return jsonify(create_error_response(f'Failed to set instances for subnet {subnet}'))
-
-
-@app.route('/api/stats/comprehensive')
-def get_comprehensive_stats():
-    """Получить полную статистику всех компонентов"""
-    try:
-        stats = tor_manager.get_comprehensive_stats()
-        return jsonify(create_success_response('Stats retrieved successfully', stats))
-    except Exception as e:
-        logger.error(f"Error getting comprehensive stats: {e}")
-        return jsonify(create_error_response(f'Failed to get stats: {str(e)}')), 500
-
-
-def signal_handler(signum, frame):
-    logger.info("Received shutdown signal, stopping services...")
-    try:
-        http_balancer.stop()
-    except:
-        pass
-    tor_manager.stop_monitoring()
-    tor_manager.stop_services()
-    exit(0)
-
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
-
-if __name__ == '__main__':
-    logger.info("Starting Tor SOCKS5 Proxy Admin Panel with HTTP Load Balancer...")
-    http_balancer.start()
-    tor_manager.start_services()
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
+    def get_comprehensive_stats(self):
+        """Получить полную статистику всех компонентов"""
+        try:
+            stats = self.tor_manager.get_comprehensive_stats()
+            return jsonify(create_success_response('Stats retrieved successfully', stats))
+        except Exception as e:
+            logger.error(f"Error getting comprehensive stats: {e}")
+            return jsonify(create_error_response(f'Failed to get stats: {str(e)}')), 500

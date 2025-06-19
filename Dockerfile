@@ -1,16 +1,17 @@
 FROM python:3.13.3-alpine3.22
 
-EXPOSE 8080/tcp 4444/tcp 5000/tcp
+EXPOSE 5000/tcp 8080/tcp
 
 RUN apk --no-cache --no-progress --quiet add tor
 
-COPY src/requirements.txt ./
+COPY src/requirements.txt ./requirements.txt
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-COPY src/ ./
+COPY start_new.py ./
+COPY src/ ./src/
 
-RUN chmod +x /start_with_admin.sh && \
-    chmod +x /admin_panel.py && \
+RUN chmod +x /start_new.py && \
+    chmod +x /src/start_with_admin.sh && \
     #
     # prepare for low-privilege execution
     addgroup proxy && \
@@ -32,4 +33,4 @@ STOPSIGNAL SIGINT
 
 USER proxy
 
-CMD ["sh", "start_with_admin.sh"]
+CMD ["python3", "start_new.py"]
