@@ -10,7 +10,7 @@ sudo apt update
 
 # Install system dependencies
 echo "Installing system dependencies..."
-sudo apt install -y python3 python3-pip tor
+sudo apt install -y python3 python3-pip tor git
 
 # Install Python packages
 echo "Installing Python dependencies..."
