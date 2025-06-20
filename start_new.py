@@ -70,9 +70,7 @@ def main():
         logger.info("Создание AdminPanel со всеми зависимостями...")
         admin_panel = AdminPanel(app, socketio, http_balancer, tor_manager)
         
-        # Запуск сервисов
-        logger.info("Пропускаем запуск HTTP балансировщика из-за проблем с внешним пакетом...")
-        # http_balancer.start()
+        http_balancer.start()
         
         logger.info("Запуск мониторинга Tor...")
         tor_manager.start_monitoring()
