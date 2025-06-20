@@ -110,9 +110,8 @@ class HTTPLoadBalancer:
             self.proxy_balancer.start()
             logger.info(f"HTTP Load Balancer started on port {self.listen_port}")
             
-            # Мониторинг отключаем пока для диагностики
-            # self.proxy_monitor = ProxyMonitor(self.proxy_balancer)
-            # self.proxy_monitor.start_monitoring()
+            self.proxy_monitor = ProxyMonitor(self.proxy_balancer)
+            self.proxy_monitor.start_monitoring()
             
         except Exception as e:
             logger.error(f"Failed to start HTTP load balancer: {e}")
