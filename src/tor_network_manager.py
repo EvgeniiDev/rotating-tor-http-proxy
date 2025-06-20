@@ -26,7 +26,7 @@ class TorNetworkManager:
         self.config_manager = ConfigManager()
         self.next_instance_id = 1
         self.socketio = socketio
-        self._subnet_lock = threading.Lock()  # Add thread protection
+        self._subnet_lock = threading.RLock()  # Используем RLock для поддержки recursive locking
         # Словарь для отслеживания соответствия instance_id → SOCKS5 port
         self.instance_ports = {}
         self.stats = {
@@ -400,10 +400,11 @@ class TorNetworkManager:
         self.stats['tor_instances'] = running_main + running_subnet
 
     def get_next_available_id(self):
-        """Get the next available instance ID"""
-        current_id = self.next_instance_id
-        self.next_instance_id += 1
-        return current_id
+        """Get the next available instance ID - thread safe"""
+        with self._subnet_lock:
+            current_id = self.next_instance_id
+            self.next_instance_id += 1
+            return current_id
 
     def get_subnet_running_instances(self, subnet):
         """Thread-safe method to get running instances count for a subnet"""

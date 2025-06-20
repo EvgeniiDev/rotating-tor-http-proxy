@@ -170,8 +170,8 @@ class AdminPanel:
             if instances == 0:
                 result = self.tor_manager.stop_subnet_tor(subnet)
             else:
-                self.tor_manager.stop_subnet_tor(subnet)
-                result = self.tor_manager.start_subnet_tor(subnet, instances)
+                # Используем restart_subnet_tor для безопасной перезагрузки
+                result = self.tor_manager.restart_subnet_tor(subnet, instances)
         
             return result
 

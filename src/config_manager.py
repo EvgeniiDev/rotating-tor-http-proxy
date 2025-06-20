@@ -1,14 +1,16 @@
 import logging
+import os
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class ConfigManager:
-    def __init__(self):
+    def __init__(self, config_dir="/etc/tor"):
         self.base_tor_socks_port = 10000    # Tor SOCKS: 10000-19999
         self.base_tor_ctrl_port = 20000     # Tor Control: 20000-29999
         self.max_instances = 9999           # Максимально экземпляров в диапазоне
+        self.config_dir = config_dir        # Директория для конфигурационных файлов
         
     def get_tor_config(self, instance_id: int, socks_port: int, ctrl_port: int,
         subnet: Optional[str] = None) -> str:
@@ -65,13 +67,34 @@ class ConfigManager:
             subnet
         )
         
-        config_path = f'/etc/tor/torrc.{instance_id}'
-        with open(config_path, 'w') as f:
-            f.write(config_content)
+        config_path = os.path.join(self.config_dir, f'torrc.{instance_id}')
+        
+        # Создаем уникальное имя файла, если файл уже существует
+        counter = 0
+        original_config_path = config_path
+        while os.path.exists(config_path):
+            counter += 1
+            config_path = f'{original_config_path}.{counter}'
+            if counter > 10:
+                logger.error(f"Too many config files for instance {instance_id}, aborting")
+                raise RuntimeError(f"Cannot create unique config file for instance {instance_id}")
+        
+        try:
+            # Создаем директорию, если она не существует
+            os.makedirs(os.path.dirname(config_path), exist_ok=True)
             
-        logger.info(f"Created Tor config {config_path}")
-        return {
-            'config_path': config_path,
-            'socks_port': ports['socks_port'],
-            'ctrl_port': ports['ctrl_port'],
-        }
+            with open(config_path, 'w') as f:
+                f.write(config_content)
+                
+            # Устанавливаем права доступа для файла конфигурации
+            os.chmod(config_path, 0o644)
+            
+            logger.info(f"Created Tor config {config_path} for instance {instance_id}")
+            return {
+                'config_path': config_path,
+                'socks_port': ports['socks_port'],
+                'ctrl_port': ports['ctrl_port'],
+            }
+        except Exception as e:
+            logger.error(f"Failed to create config file {config_path}: {e}")
+            raise
