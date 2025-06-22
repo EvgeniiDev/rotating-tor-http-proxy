@@ -11,9 +11,20 @@ function log() {
     echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") [controller] [${level}] ${msg}"
 }
 
+# Activate virtual environment if available
+if [ -f "../venv/bin/activate" ]; then
+    source ../venv/bin/activate
+    log "Virtual environment activated"
+elif [ -f "venv/bin/activate" ]; then
+    source venv/bin/activate
+    log "Virtual environment activated"
+else
+    log "warn" "Virtual environment not found, using system Python"
+fi
+
 # Start admin panel with HTTP balancer in background
 log "Starting Tor HTTP Proxy Admin Panel with integrated load balancer..."
-python3 start_new.py &
+python3 ../start_new.py &
 ADMIN_PANEL_PID=$!
 
 # Function to handle shutdown
