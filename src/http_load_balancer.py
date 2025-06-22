@@ -28,8 +28,7 @@ class HTTPLoadBalancer:
         }
         self.proxy_ports: List[int] = []
         self._lock = threading.Lock()
-        self.available_proxies: List[int] = []
-        self.unavailable_proxies: List[int] = []
+
 
     def add_proxy(self, port: int):
         with self._lock:
@@ -42,15 +41,7 @@ class HTTPLoadBalancer:
             self.config["proxies"].append(proxy_config)
             self.stats_manager.add_proxy(port)
             
-            if self._test_proxy_connection(port):
-                self.available_proxies.append(port)
-                logger.info(f"Added available SOCKS5 proxy on port {port}")
-            else:
-                self.unavailable_proxies.append(port)
-                logger.warning(f"Added unavailable SOCKS5 proxy on port {port}")
-            
-            if self.proxy_balancer:
-                self.proxy_balancer.update_proxies(self.config)
+            self.proxy_balancer.update_proxies(self.config)
 
     def remove_proxy(self, port: int):
         with self._lock:
@@ -59,42 +50,13 @@ class HTTPLoadBalancer:
 
             self.proxy_ports.remove(port)
             self.config["proxies"] = [p for p in self.config["proxies"] if p["port"] != port]
-            
-            if port in self.available_proxies:
-                self.available_proxies.remove(port)
-            if port in self.unavailable_proxies:
-                self.unavailable_proxies.remove(port)
                 
             self.stats_manager.remove_proxy(port)
             
-            if self.proxy_balancer:
-                self.proxy_balancer.update_proxies(self.config)
+            self.proxy_balancer.update_proxies(self.config)
                 
             logger.info(f"Removed SOCKS5 proxy on port {port}")
 
-    def _test_proxy_connection(self, port: int) -> bool:
-        import requests
-        
-        test_urls = ['http://httpbin.org/ip', 'http://icanhazip.com']
-        
-        session = requests.Session()
-        session.proxies = {
-            'http': f'socks5://127.0.0.1:{port}',
-            'https': f'socks5://127.0.0.1:{port}'
-        }
-        
-        for url in test_urls:
-            try:
-                response = session.get(url, timeout=10)
-                if response.status_code == 200:
-                    session.close()
-                    return True
-            except Exception as e:
-                logger.debug(f"Test connection to {url} via port {port} failed: {e}")
-                continue
-        
-        session.close()
-        return False
 
     def start(self):
         if self.proxy_balancer:
@@ -102,11 +64,9 @@ class HTTPLoadBalancer:
             return
 
         try:
-            # Создаем простой балансировщик без мониторинга пока
             self.proxy_balancer = ProxyBalancer(self.config)
             logger.info(f"HTTP Load Balancer created with config: {self.config}")
             
-            # Запускаем балансировщик
             self.proxy_balancer.start()
             logger.info(f"HTTP Load Balancer started on port {self.listen_port}")
             
@@ -142,36 +102,12 @@ class HTTPLoadBalancer:
         with self._lock:
             return {
                 'total_proxies': len(self.proxy_ports),
-                'available_proxies': len(self.available_proxies),
-                'unavailable_proxies': len(self.unavailable_proxies),
-                'available_proxy_ports': self.available_proxies.copy(),
-                'unavailable_proxy_ports': self.unavailable_proxies.copy(),
                 'listen_port': self.listen_port,
                 'proxy_stats': self.stats_manager.get_all_stats()
             }
 
-    def get_proxy_list(self) -> List[int]:
-        return self.proxy_ports.copy()
-
     def mark_proxy_success(self, port: int):
         self.stats_manager.record_request(port, True, 200)
-
-    def mark_proxy_unavailable(self, port: int):
-        self.stats_manager.record_request(port, False, 0)
-        
-        with self._lock:
-            if port in self.available_proxies:
-                self.available_proxies.remove(port)
-                if port not in self.unavailable_proxies:
-                    self.unavailable_proxies.append(port)
-
-    def get_next_proxy(self) -> Optional[int]:
-        with self._lock:
-            if not self.available_proxies:
-                return None
-            
-            import random
-            return random.choice(self.available_proxies)
 
     def get_proxy_session(self, port: int):
         import requests
@@ -185,20 +121,3 @@ class HTTPLoadBalancer:
 
     def is_running(self) -> bool:
         return self.proxy_balancer is not None
-
-    @property
-    def server_thread(self):
-        proxy_balancer = self.proxy_balancer
-        
-        class MockThread:
-            def __init__(self, balancer_ref):
-                self.balancer_ref = balancer_ref
-                
-            def is_alive(self):
-                return self.balancer_ref is not None
-        
-        if hasattr(self, '_mock_thread'):
-            return self._mock_thread
-        
-        self._mock_thread = MockThread(proxy_balancer)
-        return self._mock_thread
