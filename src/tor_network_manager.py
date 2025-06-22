@@ -407,8 +407,6 @@ class TorNetworkManager:
             return current_id
 
     def get_subnet_running_instances(self, subnet):
-        """Thread-safe method to get running instances count for a subnet"""
-        # Create a copy for safe reading without blocking writes
         subnet_key = f"subnet_{subnet.replace('.', '_')}"
         subnet_processes_copy = dict(self.subnet_tor_processes)
 
