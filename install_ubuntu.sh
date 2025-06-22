@@ -17,21 +17,71 @@ sudo pip3 install -r src/requirements.txt --break-system-packages
 
 
 
-# Set up Tor configuration
-echo "Setting up Tor configuration..."
-sudo mkdir -p /var/lib/tor
-sudo mkdir -p /var/log/tor
-sudo touch /etc/tor/torrc
+# Set up Tor configuration directories in user home
+echo "Setting up Tor configuration directories..."
 
+# Создаем основную структуру директорий
+USER_HOME=$(eval echo ~$USER)
+TOR_PROXY_DIR="$USER_HOME/.tor_proxy"
+
+echo "Creating Tor proxy directories in: $TOR_PROXY_DIR"
+mkdir -p "$TOR_PROXY_DIR/config"
+mkdir -p "$TOR_PROXY_DIR/data"
+mkdir -p "$TOR_PROXY_DIR/logs"
+
+# Устанавливаем правильные права доступа
+chmod 755 "$TOR_PROXY_DIR"
+chmod 755 "$TOR_PROXY_DIR/config"
+chmod 755 "$TOR_PROXY_DIR/data"
+chmod 755 "$TOR_PROXY_DIR/logs"
+
+# Создаем базовый файл конфигурации для проверки системы
+cat > "$TOR_PROXY_DIR/config/.gitkeep" << 'EOF'
+# This file ensures the config directory is preserved in git
+# Tor configuration files will be created here automatically
+EOF
+
+echo "✅ Tor proxy directories created successfully!"
+echo "📁 Config dir: $TOR_PROXY_DIR/config"
+echo "📁 Data dir: $TOR_PROXY_DIR/data"  
+echo "📁 Logs dir: $TOR_PROXY_DIR/logs"
 
 # Make scripts executable
 echo "Making scripts executable..."
 chmod +x start_new.py
-chmod +x service_control.sh
 
 if [ -f "src/start_with_admin.sh" ]; then
     chmod +x src/start_with_admin.sh
 fi
+
+# Создаем символические ссылки для удобства
+echo "Creating convenient symlinks..."
+USER_HOME=$(eval echo ~$USER)
+TOR_PROXY_DIR="$USER_HOME/.tor_proxy"
+
+# Создаем ссылку на директорию конфигурации в корне проекта для удобства разработки
+if [ ! -L "tor_configs" ]; then
+    ln -s "$TOR_PROXY_DIR/config" tor_configs
+    echo "Created symlink: tor_configs -> $TOR_PROXY_DIR/config"
+fi
+
+# Создаем файл с информацией о путях
+cat > "$TOR_PROXY_DIR/paths.txt" << EOF
+# Tor Proxy Directory Structure
+# Generated on $(date)
+
+Base Directory: $TOR_PROXY_DIR
+Config Directory: $TOR_PROXY_DIR/config
+Data Directory: $TOR_PROXY_DIR/data
+Logs Directory: $TOR_PROXY_DIR/logs
+
+# Usage:
+# Configuration files will be created as: $TOR_PROXY_DIR/config/torrc.{instance_id}
+# Data directories will be created as: $TOR_PROXY_DIR/data/data_{instance_id}
+# PID files will be created as: $TOR_PROXY_DIR/data/tor_{instance_id}.pid
+EOF
+
+echo "✅ Paths information saved to: $TOR_PROXY_DIR/paths.txt"
 
 # Create systemd service
 echo "Creating systemd service..."
@@ -62,16 +112,13 @@ MemoryHigh=3.5G
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=true
+ProtectHome=false
 ReadWritePaths=${SCRIPT_DIR}
-ReadWritePaths=/home/proxy
-ReadWritePaths=/var/lib/tor
-ReadWritePaths=/var/log/tor
-ReadWritePaths=/etc/tor
+ReadWritePaths=%h/.tor_proxy
 
 # Environment
 Environment=PYTHONPATH=${SCRIPT_DIR}/src
-Environment=HOME=/home/proxy
+Environment=HOME=%h
 
 [Install]
 WantedBy=multi-user.target

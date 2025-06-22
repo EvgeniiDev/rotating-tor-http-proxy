@@ -16,18 +16,12 @@ RUN chmod +x /start_new.py && \
     # prepare for low-privilege execution
     addgroup proxy && \
     adduser -S -D -u 1000 -G proxy proxy && \
-    chown -R proxy: /etc/tor/ && \
-    mkdir -p /var/local/tor && \
-    chown -R proxy: /var/local/tor && \
-    mkdir -p /var/lib/tor && \
-    chown -R proxy: /var/lib/tor && \
-    mkdir -p /var/log/tor && \
-    chown -R proxy: /var/log/tor && \
-    mkdir -p /var/run/tor && \
-    chown -R proxy: /var/run/tor && \
-    # Create a writable tmp directory for the proxy user
+    # Create tor proxy directories in user home
+    mkdir -p /home/proxy/.tor_proxy/config && \
+    mkdir -p /home/proxy/.tor_proxy/data && \
+    mkdir -p /home/proxy/.tor_proxy/logs && \
     mkdir -p /home/proxy/tmp && \
-    chown -R proxy: /home/proxy/tmp
+    chown -R proxy: /home/proxy
 
 STOPSIGNAL SIGINT
 

@@ -39,18 +39,20 @@ docker logs tor-http-proxy-balancer
 # http://localhost:5000
 ```
 
-### Вариант 2: Локальная установка
+### Вариант 4: Автоматическая установка (с systemd)
 
 ```bash
-# Устанавливаем зависимости
-cd src
-pip install -r requirements.txt
+# Автоматическая установка (создает systemd сервис)
+./install_ubuntu.sh
 
-# Запускаем с админ панелью
-python3 admin_panel_new.py
+### Вариант 5: Управление через systemd
 
-# Или простой запуск
-python3 tor_http_proxy.py --port 8080
+```bash
+# После установки через install_ubuntu.sh
+sudo systemctl start tor-proxy    # Запуск
+sudo systemctl stop tor-proxy     # Остановка
+sudo systemctl status tor-proxy   # Статус
+journalctl -u tor-proxy -f        # Логи
 ```
 
 ## Использование

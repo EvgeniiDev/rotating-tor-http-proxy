@@ -6,11 +6,21 @@ logger = logging.getLogger(__name__)
 
 
 class ConfigManager:
-    def __init__(self, config_dir="/etc/tor"):
+    def __init__(self, config_dir=None):
         self.base_tor_socks_port = 10000    # Tor SOCKS: 10000-19999
         self.base_tor_ctrl_port = 20000     # Tor Control: 20000-29999
         self.max_instances = 9999           # Максимально экземпляров в диапазоне
-        self.config_dir = config_dir        # Директория для конфигурационных файлов
+        
+        # Используем домашнюю папку пользователя для конфигурационных файлов
+        if config_dir is None:
+            home_dir = os.path.expanduser("~")
+            self.config_dir = os.path.join(home_dir, ".tor_proxy", "config")
+            self.data_dir = os.path.join(home_dir, ".tor_proxy", "data")
+            self.log_dir = os.path.join(home_dir, ".tor_proxy", "logs")
+        else:
+            self.config_dir = config_dir
+            self.data_dir = os.path.join(os.path.dirname(config_dir), "data")
+            self.log_dir = os.path.join(os.path.dirname(config_dir), "logs")
         
     def get_tor_config(self, instance_id: int, socks_port: int, ctrl_port: int,
         subnet: Optional[str] = None) -> str:
@@ -19,9 +29,9 @@ class ConfigManager:
             f"SocksPort 127.0.0.1:{socks_port}",
             f"ControlPort 127.0.0.1:{ctrl_port}",
             "HashedControlPassword 16:872860B76453A77D60CA2BB8C1A7042072093276A3D701AD684053EC4C",
-            f"PidFile /var/lib/tor/tor_{instance_id}.pid",
+            f"PidFile {self.data_dir}/tor_{instance_id}.pid",
             "RunAsDaemon 0",
-            f"DataDirectory /var/lib/tor/data_{instance_id}",
+            f"DataDirectory {self.data_dir}/data_{instance_id}",
             "GeoIPFile /usr/share/tor/geoip",
             "GeoIPv6File /usr/share/tor/geoip6",
             "NewCircuitPeriod 10",
@@ -80,9 +90,6 @@ class ConfigManager:
                 raise RuntimeError(f"Cannot create unique config file for instance {instance_id}")
         
         try:
-            # Создаем директорию, если она не существует
-            os.makedirs(os.path.dirname(config_path), exist_ok=True)
-            
             with open(config_path, 'w') as f:
                 f.write(config_content)
                 
