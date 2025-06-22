@@ -120,8 +120,8 @@ TimeoutStopSec=30
 
 # Memory limits (4GB total for service and all children)
 MemoryAccounting=true
-MemoryMax=4G
-MemoryHigh=3.5G
+MemoryMax=4.2G
+MemoryHigh=4G
 
 # Additional security
 NoNewPrivileges=true
