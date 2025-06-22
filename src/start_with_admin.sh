@@ -35,13 +35,13 @@ trap cleanup SIGINT SIGTERM
 
 log "Initializing HTTP Load Balancer configuration..."
 
-# Create necessary directories for Tor
-mkdir -p /var/lib/tor/data
-chmod 755 /var/lib/tor/data
-
-# Create /etc/tor directory if it doesn't exist
-mkdir -p /etc/tor
-chmod 755 /etc/tor
+# Create necessary directories for Tor in user home
+mkdir -p ~/.tor_proxy/config
+mkdir -p ~/.tor_proxy/data
+mkdir -p ~/.tor_proxy/logs
+chmod 755 ~/.tor_proxy/config
+chmod 755 ~/.tor_proxy/data
+chmod 755 ~/.tor_proxy/logs
 
 log "HTTP Load Balancer started successfully"
 log "Admin panel available at http://localhost:5000"
