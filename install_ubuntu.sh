@@ -9,11 +9,26 @@ sudo apt update
 
 # Install system dependencies
 echo "Installing system dependencies..."
-sudo apt install -y python3 python3-pip tor git
+sudo apt install -y python3 python3-pip python3-venv tor git
 
-# Install Python packages
-echo "Installing Python dependencies..."
-sudo pip3 install -r src/requirements.txt --break-system-packages
+# Create and set up Python virtual environment
+echo "Setting up Python virtual environment..."
+if [ ! -d "venv" ]; then
+    echo "Creating virtual environment..."
+    python3 -m venv venv
+else
+    echo "Virtual environment already exists"
+fi
+
+# Activate virtual environment and install dependencies
+echo "Installing Python dependencies in virtual environment..."
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r src/requirements.txt
+deactivate
+
+echo "✅ Virtual environment setup completed!"
+echo "📁 Virtual environment created at: $(pwd)/venv"
 
 
 
@@ -96,7 +111,7 @@ Wants=network.target
 [Service]
 Type=simple
 WorkingDirectory=${SCRIPT_DIR}
-ExecStart=/usr/bin/python3 ${SCRIPT_DIR}/start_new.py
+ExecStart=${SCRIPT_DIR}/venv/bin/python ${SCRIPT_DIR}/start_new.py
 Restart=always
 RestartSec=10
 KillMode=mixed
@@ -119,6 +134,8 @@ ReadWritePaths=%h/.tor_proxy
 # Environment
 Environment=PYTHONPATH=${SCRIPT_DIR}/src
 Environment=HOME=%h
+Environment=VIRTUAL_ENV=${SCRIPT_DIR}/venv
+Environment=PATH=${SCRIPT_DIR}/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 [Install]
 WantedBy=multi-user.target
@@ -136,10 +153,13 @@ sudo systemctl enable tor-proxy.service
 # Script installation completed
 echo "Installation completed successfully!"
 echo ""
+echo "✅ Python virtual environment has been set up at: $(pwd)/venv"
+echo "✅ All dependencies installed in isolated environment"
+echo ""
 echo "Systemd service 'tor-proxy' has been created and enabled."
 echo ""
 echo "To control the service:"
-echo "sudo systemctl start tor-proxy    # Start the service"
+echo "sudo systemctl start tor-proxy    # Start the service" 
 echo "sudo systemctl stop tor-proxy     # Stop the service"
 echo "sudo systemctl restart tor-proxy  # Restart the service"
 echo "sudo systemctl status tor-proxy   # Check service status"
