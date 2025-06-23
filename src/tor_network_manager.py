@@ -164,8 +164,8 @@ class TorNetworkManager:
                     logger.error(f"Error starting Tor instance {batch_start + i + 1} with subnet {subnet}: {e}")
             
             if batch_end < count:
-                logger.info(f"Batch {batch_start//batch_size + 1} completed. Waiting 8 seconds before next batch...")
-                time.sleep(8)
+                logger.info(f"Batch {batch_start//batch_size + 1} completed. Waiting 10 seconds before next batch...")
+                time.sleep(10)
         
         logger.info(f"Auto-start completed: {total_started}/{count} instances started successfully")
 
