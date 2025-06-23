@@ -4,7 +4,6 @@ IMAGE_NAME="rotating-tor-proxy"
 CONTAINER_NAME="tor-proxy"
 
 MEMORY_LIMIT=${MEMORY_LIMIT:-"1g"}
-MAX_MEMORY=${MAX_MEMORY:-"1g"}
 TOR_PROCESSES=${TOR_PROCESSES:-"50"}
 
 echo "Building Docker image..."
@@ -24,7 +23,6 @@ docker run -d \
     -p 5000:5000 \
     -p 8080:8080 \
     --memory=$MEMORY_LIMIT \
-    --memory-swap=$MAX_MEMORY \
     -e TOR_PROCESSES=$TOR_PROCESSES \
     $IMAGE_NAME
 
