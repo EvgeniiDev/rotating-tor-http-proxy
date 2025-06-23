@@ -17,7 +17,10 @@ class ConfigManager:
         self.log_dir = os.path.join(home_dir, ".tor_proxy", "logs")
         
     def get_tor_config(self, instance_id: int, socks_port: int, ctrl_port: int,
-        subnet: Optional[str] = None) -> str:
+        subnet: str) -> str:
+        if not subnet:
+            raise ValueError("Subnet is required for Tor configuration")
+            
         config_lines = [
             f"# Tor Instance {instance_id}",
             f"SocksPort 127.0.0.1:{socks_port}",
@@ -37,6 +40,7 @@ class ConfigManager:
             f"ExitNodes {subnet}.0.0/16",
             "StrictNodes 1",
         ]
+        
         return '\n'.join(config_lines)
 
     def get_port_assignment(self, instance_id: int) -> Dict:
@@ -51,7 +55,10 @@ class ConfigManager:
             'ctrl_port': ctrl_port,          # 20000, 20001, 20002...
         }
 
-    def create_tor_config(self, instance_id: int, subnet: Optional[str] = None) -> Dict:
+    def create_tor_config(self, instance_id: int, subnet: str) -> Dict:
+        if not subnet:
+            raise ValueError("Subnet is required for Tor configuration")
+            
         ports = self.get_port_assignment(instance_id)
         config_content = self.get_tor_config(
             instance_id,

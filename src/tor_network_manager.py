@@ -91,9 +91,21 @@ class TorNetworkManager:
 
         logger.info(
             f"Filtered to {len(valid_subnets)} subnets with exit probability > 0")
+        
+        self.available_subnets = sorted(list(valid_subnets))
+        
         return relays
 
-    def start_services(self):
+    def get_available_subnets(self, count=None):
+        if not hasattr(self, 'available_subnets'):
+            self.available_subnets = []
+        
+        if count is None:
+            return self.available_subnets
+        
+        return self.available_subnets[:count]
+
+    def start_services(self, auto_start_count=None):
         """Initialize infrastructure without starting Tor instances"""
         if self.services_started:
             logger.info("Services infrastructure already initialized")
@@ -105,7 +117,44 @@ class TorNetworkManager:
         self.update_running_instances_count()
 
         logger.info("Services infrastructure initialized successfully.")
+        
+        if auto_start_count and auto_start_count > 0:
+            logger.info(f"Auto-starting {auto_start_count} Tor instances...")
+            self._auto_start_tor_instances(auto_start_count)
+        
         return True
+
+    def _auto_start_tor_instances(self, count):
+        available_subnets = self.get_available_subnets(count)
+        
+        if not available_subnets:
+            relay_data = self.fetch_tor_relays()
+            if relay_data:
+                self.extract_relay_ips(relay_data)
+                available_subnets = self.get_available_subnets(count)
+        
+        if not available_subnets:
+            logger.warning("No subnets available for Tor instances")
+            return
+            
+        logger.info(f"Using subnets: {available_subnets}")
+        
+        for i, subnet in enumerate(available_subnets):
+            if i >= count:
+                break
+                
+            try:
+                instance_id = self.next_instance_id
+                self.next_instance_id += 1
+                
+                process = self._start_tor_instance(instance_id, subnet)
+                if process:
+                    self.tor_processes[instance_id] = process
+                    logger.info(f"Started Tor instance {instance_id} with subnet {subnet}")
+                else:
+                    logger.warning(f"Failed to start Tor instance {instance_id} with subnet {subnet}")
+            except Exception as e:
+                logger.error(f"Error starting Tor instance {i+1} with subnet {subnet}: {e}")
 
     def stop_services(self):
         """Stop all Tor instances"""
@@ -318,7 +367,7 @@ class TorNetworkManager:
         self.instance_ports[instance_id] = port
         # Добавляем SOCKS5 прокси в HTTP балансировщик
         self.load_balancer.add_proxy(port)
-        logger.info(f"Started Tor instance {instance_id} on socks5 port {port}, added to HTTP load balancer")
+        logger.info(f"Started Tor instance {instance_id} on socks5 port {port}, добавлен в HTTP балансировщик")
         return process
 
 
@@ -337,12 +386,12 @@ class TorNetworkManager:
             if process:
                 self.subnet_tor_processes[subnet_key][instance_id] = process
             else:
-                logger.error(f"Failed to start Tor instance {instance_id} for subnet {subnet}")
+                logger.error(f"Не удалось запустить Tor instance {instance_id} для подсети {subnet}")
                 return False
 
         self.active_subnets.add(subnet)
         self.update_running_instances_count()
-        logger.info(f"Started {instances_count} Tor instances for subnet {subnet}")
+        logger.info(f"Запущено {instances_count} Tor instances для подсети {subnet}")
         return True
 
     def start_subnet_tor(self, subnet, instances_count=1):

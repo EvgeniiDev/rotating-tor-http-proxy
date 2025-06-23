@@ -6,3 +6,5 @@
 4. Do not create or update readme files or other documentation files.
 5. Ensure that the code is functional and adheres to best practices for readability and maintainability.
 6. Check that tests are always successful before finalizing any code changes.
+7. Do not write instructions.
+8. 
