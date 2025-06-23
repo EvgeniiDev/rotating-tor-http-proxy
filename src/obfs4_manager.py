@@ -29,16 +29,28 @@ class OBFS4Manager:
     def get_fresh_bridges(self, count: int = 10) -> List[str]:
         try:
             working_relays = self.relay_parser.get_working_bridges(
-                count=count,
+                count=max(count // 2, 3),
                 ports=[80, 443]
             )
+            
+            if len(working_relays) < count // 3:
+                logger.info("Not enough bridges found, trying extended ports")
+                working_relays = self.relay_parser.get_working_bridges(
+                    count=count,
+                    ports=[80, 443, 8080, 8443, 9000, 9001]
+                )
+            
             fresh_bridges = []
             for relay in working_relays:
                 bridge_lines = relay.get_bridge_lines()
                 fresh_bridges.extend(bridge_lines)
             
+            if not fresh_bridges:
+                logger.warning("No fresh bridges found, using builtin bridges")
+                return self.get_builtin_bridges()[:count]
+            
             logger.info(f"Retrieved {len(fresh_bridges)} fresh working bridges")
-            return fresh_bridges
+            return fresh_bridges[:count]
         except Exception as e:
             logger.error(f"Failed to get fresh bridges: {e}")
             return self.get_builtin_bridges()[:count]

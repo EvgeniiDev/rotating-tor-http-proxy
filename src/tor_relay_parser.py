@@ -34,17 +34,17 @@ class TorRelayGrabber:
         return None
 
     def grab(self, preferred_urls_list=None):
-        base_url = "https://onionoo.torproject.org/details?type=relay&running=true&fields=fingerprint,or_addresses,country"
+        relay_url = "https://onionoo.torproject.org/details?type=relay&running=true&fields=fingerprint,or_addresses,country"
         
         urls = []
         if preferred_urls_list:
             urls.extend(preferred_urls_list)
         
-        urls.append(base_url)
+        urls.append(relay_url)
         
         for cors_proxy in self.cors_proxies:
             if "{}" in cors_proxy:
-                urls.append(cors_proxy.format(urllib.parse.quote(base_url)))
+                urls.append(cors_proxy.format(urllib.parse.quote(relay_url)))
         
         urls.extend([
             "https://github.com/ValdikSS/tor-onionoo-mirror/raw/master/details-running-relays-fingerprint-address-only.json",
@@ -54,7 +54,7 @@ class TorRelayGrabber:
         for url in urls:
             try:
                 data = self._grab(url)
-                if data:
+                if data and (("relays" in data and data["relays"]) or ("bridges" in data and data["bridges"])):
                     return data
             except Exception as e:
                 logger.debug(f"Can't download from {url}: {e}")
@@ -62,8 +62,11 @@ class TorRelayGrabber:
 
     def grab_parse(self, preferred_urls_list=None):
         grabbed = self.grab(preferred_urls_list)
-        if grabbed and "relays" in grabbed:
-            return grabbed["relays"]
+        if grabbed:
+            if "relays" in grabbed:
+                return grabbed["relays"]
+            elif "bridges" in grabbed:
+                return grabbed["bridges"]
         return []
 
 
@@ -86,15 +89,28 @@ class TorRelay:
                 continue
         return ret
 
-    async def check_connectivity(self, timeout=5.0):
+    async def check_connectivity(self, timeout=5.0, deep_check=False):
         self.reachable = []
         for host, port in self.iptuples:
             try:
                 reader, writer = await asyncio.wait_for(
                     asyncio.open_connection(host, port), timeout)
+                
+                if deep_check:
+                    try:
+                        writer.write(b'\x16\x03\x01\x00\x01\x01')
+                        await writer.drain()
+                        await asyncio.sleep(0.1)
+                        data = await asyncio.wait_for(reader.read(100), timeout=1.0)
+                        if len(data) > 0:
+                            self.reachable.append((host, port))
+                    except Exception:
+                        pass
+                else:
+                    self.reachable.append((host, port))
+                    
                 writer.close()
                 await writer.wait_closed()
-                self.reachable.append((host, port))
             except Exception:
                 continue
         return len(self.reachable) > 0
@@ -103,7 +119,11 @@ class TorRelay:
         lines = []
         for host, port in self.reachable:
             host_str = f"[{host}]" if ":" in host else host
-            lines.append(f"obfs4 {host_str}:{port} {self.fingerprint} cert=AUTO iat-mode=0")
+            if self.relayinfo.get("type") == "bridge":
+                cert = self.relayinfo.get("cert", "AUTO")
+                lines.append(f"obfs4 {host_str}:{port} {self.fingerprint} cert={cert} iat-mode=0")
+            else:
+                lines.append(f"obfs4 {host_str}:{port} {self.fingerprint} cert=AUTO iat-mode=0")
         return lines
 
 
@@ -131,11 +151,23 @@ class TorRelayParser:
                     filtered_relays.append(relay)
             relays = filtered_relays
         
-        return self._test_relays_sync(relays[:count * 3])
+        return self._test_relays_sync(relays[:min(len(relays), count * 5)])
     
     def _test_relays_sync(self, relays):
         try:
-            return asyncio.run(self._test_relays_async(relays))
+            loop = None
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+            
+            if loop is None:
+                return asyncio.run(self._test_relays_async(relays))
+            else:
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, self._test_relays_async(relays))
+                    return future.result()
         except Exception as e:
             logger.error(f"Error testing relays: {e}")
             return []
