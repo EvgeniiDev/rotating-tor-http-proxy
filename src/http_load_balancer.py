@@ -41,7 +41,8 @@ class HTTPLoadBalancer:
             self.config["proxies"].append(proxy_config)
             self.stats_manager.add_proxy(port)
             
-            self.proxy_balancer.update_proxies(self.config)
+            if self.proxy_balancer:
+                self.proxy_balancer.update_proxies(self.config)
 
     def remove_proxy(self, port: int):
         with self._lock:
@@ -53,7 +54,8 @@ class HTTPLoadBalancer:
                 
             self.stats_manager.remove_proxy(port)
             
-            self.proxy_balancer.update_proxies(self.config)
+            if self.proxy_balancer:
+                self.proxy_balancer.update_proxies(self.config)
                 
             logger.info(f"Removed SOCKS5 proxy on port {port}")
 
