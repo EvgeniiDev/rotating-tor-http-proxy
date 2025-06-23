@@ -139,22 +139,35 @@ class TorNetworkManager:
             
         logger.info(f"Using subnets: {available_subnets}")
         
-        for i, subnet in enumerate(available_subnets):
-            if i >= count:
-                break
-                
-            try:
-                instance_id = self.next_instance_id
-                self.next_instance_id += 1
-                
-                process = self._start_tor_instance(instance_id, subnet)
-                if process:
-                    self.tor_processes[instance_id] = process
-                    logger.info(f"Started Tor instance {instance_id} with subnet {subnet}")
-                else:
-                    logger.warning(f"Failed to start Tor instance {instance_id} with subnet {subnet}")
-            except Exception as e:
-                logger.error(f"Error starting Tor instance {i+1} with subnet {subnet}: {e}")
+        batch_size = 20
+        total_started = 0
+        
+        for batch_start in range(0, count, batch_size):
+            batch_end = min(batch_start + batch_size, count)
+            batch_subnets = available_subnets[batch_start:batch_end]
+            
+            logger.info(f"Starting batch {batch_start//batch_size + 1}: instances {batch_start + 1}-{batch_end}")
+            
+            for i, subnet in enumerate(batch_subnets):
+                try:
+                    instance_id = self.next_instance_id
+                    self.next_instance_id += 1
+                    
+                    process = self._start_tor_instance(instance_id, subnet)
+                    if process:
+                        self.tor_processes[instance_id] = process
+                        total_started += 1
+                        logger.info(f"Started Tor instance {instance_id} with subnet {subnet}")
+                    else:
+                        logger.warning(f"Failed to start Tor instance {instance_id} with subnet {subnet}")
+                except Exception as e:
+                    logger.error(f"Error starting Tor instance {batch_start + i + 1} with subnet {subnet}: {e}")
+            
+            if batch_end < count:
+                logger.info(f"Batch {batch_start//batch_size + 1} completed. Waiting 3 seconds before next batch...")
+                time.sleep(3)
+        
+        logger.info(f"Auto-start completed: {total_started}/{count} instances started successfully")
 
     def stop_services(self):
         """Stop all Tor instances"""
