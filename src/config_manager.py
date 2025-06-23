@@ -69,15 +69,6 @@ class ConfigManager:
         
         config_path = os.path.join(self.config_dir, f'torrc.{instance_id}')
         
-        counter = 0
-        original_config_path = config_path
-        while os.path.exists(config_path):
-            counter += 1
-            config_path = f'{original_config_path}.{counter}'
-            if counter > 10:
-                logger.error(f"Too many config files for instance {instance_id}, aborting")
-                raise RuntimeError(f"Cannot create unique config file for instance {instance_id}")
-        
         try:
             with open(config_path, 'w') as f:
                 f.write(config_content)
