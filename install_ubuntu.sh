@@ -9,7 +9,7 @@ sudo apt update
 
 # Install system dependencies
 echo "Installing system dependencies..."
-sudo apt install -y python3 python3-pip python3-venv tor git
+sudo apt install -y python3 python3-pip python3-venv tor git obfs4proxy
 
 # Create and set up Python virtual environment
 echo "Setting up Python virtual environment..."
@@ -105,17 +105,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 sudo tee /etc/systemd/system/tor-proxy.service > /dev/null <<EOF
 [Unit]
 Description=Rotating Tor HTTP Proxy
-After=network.target
-Wants=network.target
 
 [Service]
 Type=simple
 WorkingDirectory=${SCRIPT_DIR}
 ExecStart=${SCRIPT_DIR}/venv/bin/python ${SCRIPT_DIR}/start_new.py
 Restart=always
-RestartSec=10
-KillMode=mixed
-KillSignal=SIGTERM
 TimeoutStopSec=30
 
 # Memory limits (4GB total for service and all children)
@@ -124,10 +119,6 @@ MemoryMax=4.2G
 MemoryHigh=4G
 
 # Additional security
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=false
 ReadWritePaths=${SCRIPT_DIR}
 ReadWritePaths=%h/.tor_proxy
 

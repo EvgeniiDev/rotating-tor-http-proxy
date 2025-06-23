@@ -1183,7 +1183,7 @@
                     body: JSON.stringify({ instances: instances })
                 })
                     .then(response => response.json())
-                    .then(data => {
+                    .then data => {
                         completed++;
                         if (!data.success) {
                             errors++;
@@ -1453,7 +1453,9 @@
             const subnetLimitSelect = document.getElementById('subnetLimitSelect');
             if (subnetLimitSelect) {
                 subnetLimitSelect.addEventListener('change', handleSubnetLimitChange);
-            }            // Периодическое обновление данных каждые 10 секунд
+            }
+            
+            // Периодическое обновление данных каждые 10 секунд
             setInterval(refreshAllData, 10000);
         });
     </script>

@@ -1,20 +1,26 @@
 import logging
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, List
+from obfs4_manager import OBFS4Manager
 
 logger = logging.getLogger(__name__)
 
 
 class ConfigManager:
     def __init__(self, config_dir=None):
-        self.base_tor_socks_port = 10000    # Tor SOCKS: 10000-19999
-        self.base_tor_ctrl_port = 20000     # Tor Control: 20000-29999
-        self.max_instances = 9999           # Максимально экземпляров в диапазоне
+        self.base_tor_socks_port = 10000
+        self.base_tor_ctrl_port = 20000
+        self.max_instances = 9999
+        self.obfs4_manager = OBFS4Manager()
         
         home_dir = os.path.expanduser("~")
         self.config_dir = os.path.join(home_dir, ".tor_proxy", "config")
         self.data_dir = os.path.join(home_dir, ".tor_proxy", "data")
         self.log_dir = os.path.join(home_dir, ".tor_proxy", "logs")
+        
+        os.makedirs(self.config_dir, exist_ok=True)
+        os.makedirs(self.data_dir, exist_ok=True)
+        os.makedirs(self.log_dir, exist_ok=True)
         
     def get_tor_config(self, instance_id: int, socks_port: int, ctrl_port: int,
         subnet: Optional[str] = None) -> str:
@@ -33,10 +39,24 @@ class ConfigManager:
             "ClientOnly 1",
             "UseMicrodescriptors 1",
             "MaxClientCircuitsPending 16",
-            "EnforceDistinctSubnets 0",
-            f"ExitNodes {subnet}.0.0/16",
-            "StrictNodes 1",
         ]
+        
+        bridge_config = self._get_working_bridges_for_instance(instance_id)
+        config_lines.extend(bridge_config)
+        config_lines.extend([
+            "EnforceDistinctSubnets 0",
+            "FascistFirewall 1",
+            "ReachableAddresses *:80,*:443",
+            "ReachableORAddresses *:80,*:443",
+            "ReachableDirAddresses *:80,*:443"
+        ])
+            
+        if subnet:
+            config_lines.extend([
+                f"ExitNodes {subnet}.0.0/16",
+                "StrictNodes 1",
+            ])
+            
         return '\n'.join(config_lines)
 
     def get_port_assignment(self, instance_id: int) -> Dict:
@@ -48,7 +68,7 @@ class ConfigManager:
         
         return {
             'socks_port': socks_port,        # 10000, 10001, 10002...
-            'ctrl_port': ctrl_port,          # 20000, 20001, 20002...
+            'ctrl_port': ctrl_port          # 20000, 20001, 20002...
         }
 
     def create_tor_config(self, instance_id: int, subnet: Optional[str] = None) -> Dict:
@@ -86,3 +106,25 @@ class ConfigManager:
         except Exception as e:
             logger.error(f"Failed to create config file {config_path}: {e}")
             raise
+
+    def _get_working_bridges_for_instance(self, instance_id: int) -> List[str]:
+        try:
+            working_bridges = self.obfs4_manager.get_fresh_bridges(5)
+            if not working_bridges:
+                working_bridges = self.obfs4_manager.get_builtin_bridges()[:3]
+            
+            config_lines = ["UseBridges 1", "ClientTransportPlugin obfs4 exec /usr/bin/obfs4proxy"]
+            
+            for bridge in working_bridges[:3]:
+                config_lines.append(f"Bridge {bridge}")
+            
+            logger.info(f"Instance {instance_id}: configured with {len(working_bridges[:3])} bridges")
+            return config_lines
+            
+        except Exception as e:
+            logger.error(f"Error getting bridges for instance {instance_id}: {e}")
+            builtin_bridges = self.obfs4_manager.get_builtin_bridges()[:3]
+            config_lines = ["UseBridges 1", "ClientTransportPlugin obfs4 exec /usr/bin/obfs4proxy"]
+            for bridge in builtin_bridges:
+                config_lines.append(f"Bridge {bridge}")
+            return config_lines

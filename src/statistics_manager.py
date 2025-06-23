@@ -7,8 +7,6 @@ logger = logging.getLogger(__name__)
 
 
 class SimplifiedProxyStats:
-    """Упрощенная статистика для одного прокси-сервера - только успешные/неуспешные запросы"""
-    
     def __init__(self, port: int):
         self.port = port
         self.successful_requests = 0
