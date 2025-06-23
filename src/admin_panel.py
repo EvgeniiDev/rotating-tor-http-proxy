@@ -27,6 +27,7 @@ class AdminPanel:
     def _register_routes(self):
         """Регистрация всех маршрутов"""
         self.app.route('/')(self.index)
+        self.app.route('/health')(self.health_check)
         self.app.route('/api/subnets')(self.get_subnets)
         self.app.route('/api/status')(self.get_status)
         self.app.route('/api/subnet/<subnet>/start', methods=['POST'])(self.start_subnet)
@@ -71,6 +72,15 @@ class AdminPanel:
     def index(self):
         """Главная страница"""
         return render_template('admin.html')
+
+    def health_check(self):
+        """Проверка работоспособности сервиса"""
+        try:
+            # Простейшая проверка - просто вернуть 200 OK
+            return jsonify(create_success_response('Service is up and running'))
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+            return jsonify(create_error_response('Health check failed', str(e))), 500
 
     def get_subnets(self):
         """Получение списка подсетей"""

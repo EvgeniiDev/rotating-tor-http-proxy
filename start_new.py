@@ -45,12 +45,14 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
+    tor_processes = int(os.environ.get('TOR_PROCESSES', '50'))
+    
     logger.info("Запуск Rotating Tor HTTP Proxy с внешним балансировщиком")
     logger.info("Используется прямой импорт proxy-load-balancer как Python модуль")
     logger.info("Все классы создаются централизованно в start_new.py")
+    logger.info(f"Количество Tor процессов: {tor_processes}")
     
     try:
-        # Создание Flask app и SocketIO отдельно
         from flask import Flask
         from flask_socketio import SocketIO
         
@@ -76,7 +78,7 @@ def main():
         tor_manager.start_monitoring()
         
         logger.info("Запуск Tor сервисов...")
-        tor_manager.start_services()
+        tor_manager.start_services(tor_processes)
         
         logger.info("Запуск веб-интерфейса...")
         logger.info("Веб-интерфейс доступен по адресу: http://localhost:5000")
