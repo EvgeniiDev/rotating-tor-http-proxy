@@ -22,6 +22,7 @@ docker run -d \
     --name $CONTAINER_NAME \
     -p 5000:5000 \
     -p 8080:8080 \
+    --cpus="2" \
     --memory=$MEMORY_LIMIT \
     -e TOR_PROCESSES=$TOR_PROCESSES \
     $IMAGE_NAME
