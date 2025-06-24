@@ -5,39 +5,39 @@ set -e
 PROJECT_DIR="/opt/tor-http-proxy"
 SERVICE_NAME="tor-http-proxy"
 USER="tor-proxy"
-TOR_PROCESSES=50
+TOR_PROCESSES=200
 
-echo "=== Установка Tor HTTP Proxy на Ubuntu 22.04 ==="
+echo "=== Installing Tor HTTP Proxy on Ubuntu 22.04 ==="
 
 if [[ $EUID -ne 0 ]]; then
-   echo "Этот скрипт должен быть запущен от имени root (используйте sudo)" 
+   echo "This script must be run as root (use sudo)" 
    exit 1
 fi
 
-echo "Обновление системы..."
+echo "Updating system..."
 apt update && apt upgrade -y
 
-echo "Установка зависимостей..."
+echo "Installing dependencies..."
 apt install -y python3 python3-pip python3-venv tor git
 
-echo "Создание пользователя для сервиса..."
+echo "Creating service user..."
 if ! id "$USER" &>/dev/null; then
     useradd -r -s /bin/false -d "$PROJECT_DIR" "$USER"
 fi
 
-echo "Создание директории проекта..."
+echo "Creating project directory..."
 mkdir -p "$PROJECT_DIR"
 
-echo "Копирование файлов проекта..."
+echo "Copying project files..."
 cp -r src/* "$PROJECT_DIR/"
 
-echo "Создание виртуального окружения..."
+echo "Creating virtual environment..."
 cd "$PROJECT_DIR"
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-echo "Настройка директорий Tor..."
+echo "Setting up Tor directories..."
 mkdir -p "$PROJECT_DIR/.tor_proxy/config"
 mkdir -p "$PROJECT_DIR/.tor_proxy/data"
 mkdir -p "$PROJECT_DIR/.tor_proxy/logs"
@@ -45,10 +45,10 @@ chmod 755 "$PROJECT_DIR/.tor_proxy/config"
 chmod 755 "$PROJECT_DIR/.tor_proxy/data"
 chmod 755 "$PROJECT_DIR/.tor_proxy/logs"
 
-echo "Настройка прав доступа..."
+echo "Setting up permissions..."
 chown -R "$USER:$USER" "$PROJECT_DIR"
 
-echo "Создание systemd сервиса..."
+echo "Creating systemd service..."
 cat > /etc/systemd/system/$SERVICE_NAME.service << EOF
 [Unit]
 Description=Tor HTTP Proxy with Load Balancer
@@ -65,32 +65,34 @@ Restart=always
 RestartSec=10
 MemoryAccounting=yes
 MemoryMax=4G
+CPUAccounting=yes
+CPUQuota=200%
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-echo "Перезагрузка systemd и включение сервиса..."
+echo "Reloading systemd and enabling service..."
 systemctl daemon-reload
 systemctl enable $SERVICE_NAME
 
-echo "=== Установка завершена! ==="
+echo "=== Installation completed! ==="
 echo ""
-echo "Управление сервисом:"
-echo "  sudo systemctl start $SERVICE_NAME    # Запуск"
-echo "  sudo systemctl stop $SERVICE_NAME     # Остановка"
-echo "  sudo systemctl restart $SERVICE_NAME  # Перезапуск"
-echo "  sudo systemctl status $SERVICE_NAME   # Статус"
-echo "  journalctl -u $SERVICE_NAME -f        # Логи"
+echo "Service management:"
+echo "  sudo systemctl start $SERVICE_NAME    # Start"
+echo "  sudo systemctl stop $SERVICE_NAME     # Stop"
+echo "  sudo systemctl restart $SERVICE_NAME  # Restart"
+echo "  sudo systemctl status $SERVICE_NAME   # Status"
+echo "  journalctl -u $SERVICE_NAME -f        # Logs"
 echo ""
-echo "После запуска сервиса:"
+echo "After starting the service:"
 echo "  HTTP Proxy: http://localhost:8080"
 echo "  Admin Panel: http://localhost:5000"
 echo ""
-echo "Запустить сейчас? (y/n)"
+echo "Start now? (y/n)"
 read -r response
 if [[ "$response" =~ ^[Yy]$ ]]; then
     systemctl start $SERVICE_NAME
-    echo "Сервис запущен!"
-    echo "Проверьте статус: sudo systemctl status $SERVICE_NAME"
+    echo "Service started!"
+    echo "Check status: sudo systemctl status $SERVICE_NAME"
 fi
