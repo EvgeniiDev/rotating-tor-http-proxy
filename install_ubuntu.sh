@@ -52,8 +52,8 @@ ExecStart=$PROJECT_DIR/venv/bin/python $PROJECT_DIR/start_new.py
 Restart=always
 RestartSec=10
 MemoryAccounting=yes
-MemoryHigh=4G
-MemoryMax=4.1G
+MemoryHigh=4.3G
+MemoryMax=4.5G
 CPUAccounting=yes
 CPUQuota=200%
 
