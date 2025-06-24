@@ -1,6 +1,8 @@
 import logging
 import threading
 import time
+import traceback
+import requests
 from typing import List, Dict, Optional, Any
 from proxy_load_balancer.balancer import ProxyBalancer
 from proxy_load_balancer.monitor import ProxyMonitor
@@ -77,7 +79,6 @@ class HTTPLoadBalancer:
             
         except Exception as e:
             logger.error(f"Failed to start HTTP load balancer: {e}")
-            import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise
 
@@ -112,8 +113,6 @@ class HTTPLoadBalancer:
         self.stats_manager.record_request(port, True, 200)
 
     def get_proxy_session(self, port: int):
-        import requests
-        
         session = requests.Session()
         session.proxies = {
             'http': f'socks5://127.0.0.1:{port}',

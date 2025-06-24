@@ -9,8 +9,8 @@ import os
 import sys
 import logging
 import signal
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+from flask import Flask
+from flask_socketio import SocketIO
 
 from admin_panel import AdminPanel
 from http_load_balancer import HTTPLoadBalancer
@@ -53,12 +53,9 @@ def main():
     logger.info(f"Количество Tor процессов: {tor_processes}")
     
     try:
-        from flask import Flask
-        from flask_socketio import SocketIO
-        
         logger.info("Создание Flask app и SocketIO...")
         # Указываем правильные пути для шаблонов
-        app = Flask(__name__, template_folder='src/templates')
+        app = Flask(__name__, template_folder='templates')
         socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
         
         # Создание всех компонентов в стартовом файле
