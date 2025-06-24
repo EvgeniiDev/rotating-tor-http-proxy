@@ -84,3 +84,20 @@ Temporary Items
 .apdisk
 
 __pycache__/
+
+# Python virtual environment
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# Python package files
+*.egg-info/
+dist/
+build/
+
+# Python cache
+*.pyc
+*.pyo
+*.pyd

@@ -1,46 +1,35 @@
 FROM python:3.13.3-alpine3.22
 
-EXPOSE 1080/tcp 4444/tcp 5000/tcp
+EXPOSE 5000/tcp 8080/tcp
 
-# Install system packages in separate layer for better caching
-# Fix HAProxy version to 3.0 for consistent command compatibility and modern features
-RUN apk --no-cache --no-progress --quiet add tor socat haproxy~=3.0
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV TOR_PROCESSES=50
 
-COPY src/requirements.txt ./
+RUN apk --no-cache --no-progress --quiet add \
+    tor \
+    git \
+    wget \
+    && rm -rf /var/cache/apk/*
+
+COPY src/requirements.txt ./requirements.txt
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-COPY src/ ./
+COPY start_new.py ./
+COPY src/ ./src/
 
-RUN cp /haproxy.cfg /etc/haproxy/haproxy.cfg && \
-    chmod +x /start_with_admin.sh && \
-    chmod +x /admin_panel.py && \
-    #
-    # prepare for low-privilege execution
-    addgroup proxy && \
+RUN addgroup proxy && \
     adduser -S -D -u 1000 -G proxy proxy && \
-    chown -R proxy: /etc/haproxy/ && \
-    mkdir -p /var/lib/haproxy && \
-    chown -R proxy: /var/lib/haproxy && \
-    mkdir -p /var/local/haproxy && \
-    chown -R proxy: /var/local/haproxy && \
-    # Create the server state file for HAProxy
-    touch /var/local/haproxy/server-state && \
-    chown proxy: /var/local/haproxy/server-state && \
-    chown -R proxy: /etc/tor/ && \
-    mkdir -p /var/local/tor && \
-    chown -R proxy: /var/local/tor && \
-    mkdir -p /var/lib/tor && \
-    chown -R proxy: /var/lib/tor && \
-    mkdir -p /var/log/tor && \
-    chown -R proxy: /var/log/tor && \
-    mkdir -p /var/run/tor && \
-    chown -R proxy: /var/run/tor && \
-    # Create a writable tmp directory for the proxy user
-    mkdir -p /home/proxy/tmp && \
-    chown -R proxy: /home/proxy/tmp
-
-STOPSIGNAL SIGINT
+    mkdir -p /home/proxy/.tor_proxy/config && \
+    mkdir -p /home/proxy/.tor_proxy/data && \
+    mkdir -p /home/proxy/.tor_proxy/logs && \
+    chown -R proxy: /home/proxy
 
 USER proxy
 
-CMD ["sh", "start_with_admin.sh"]
+WORKDIR /home/proxy
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost:5000/health || exit 1
+
+CMD ["python3", "/start_new.py"]

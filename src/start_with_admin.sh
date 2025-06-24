@@ -11,9 +11,20 @@ function log() {
     echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") [controller] [${level}] ${msg}"
 }
 
-# Start admin panel in background
-log "Starting Tor Network Admin Panel..."
-python3 admin_panel.py &
+# Activate virtual environment if available
+if [ -f "../venv/bin/activate" ]; then
+    source ../venv/bin/activate
+    log "Virtual environment activated"
+elif [ -f "venv/bin/activate" ]; then
+    source venv/bin/activate
+    log "Virtual environment activated"
+else
+    log "warn" "Virtual environment not found, using system Python"
+fi
+
+# Start admin panel with HTTP balancer in background
+log "Starting Tor HTTP Proxy Admin Panel with integrated load balancer..."
+python3 ../start_new.py &
 ADMIN_PANEL_PID=$!
 
 # Function to handle shutdown
@@ -22,36 +33,30 @@ cleanup() {
     if [[ -n $ADMIN_PANEL_PID ]]; then
         kill $ADMIN_PANEL_PID 2>/dev/null
     fi
+    
     # Kill all tor processes
     pkill -f tor 2>/dev/null
-
-    # Stop HAProxy using systemd
-    log "Stopping HAProxy..."
-    systemctl stop haproxy 2>/dev/null || true
     
+    log "All services stopped"
     exit 0
 }
 
 # Set up signal handlers
 trap cleanup SIGINT SIGTERM
 
-log "Initializing configuration files..."
+log "Initializing HTTP Load Balancer configuration..."
 
+# Create necessary directories for Tor in user home
+mkdir -p ~/.tor_proxy/config
+mkdir -p ~/.tor_proxy/data
+mkdir -p ~/.tor_proxy/logs
+chmod 755 ~/.tor_proxy/config
+chmod 755 ~/.tor_proxy/data
+chmod 755 ~/.tor_proxy/logs
 
-systemctl start haproxy
-if ! systemctl is-active --quiet haproxy; then
-    log "error" "Failed to start HAProxy with systemd"
-    exit 1
-fi
+log "HTTP Load Balancer started successfully"
+log "Admin panel available at http://localhost:5000"
+log "HTTP proxy available at http://localhost:8080"
 
-log "Base services started successfully!"
-log "Admin Panel: http://localhost:5000"
-log "HAProxy Stats: http://localhost:4444"
-log "Proxy will be available at: socks5://localhost:1080 (after starting Tor instances through Admin Panel)"
-log "Use the Admin Panel to start and manage Tor instances"
-
-# Wait for admin panel or any process to exit
-wait
-
-# Cleanup on exit
-cleanup
+# Wait for admin panel to finish
+wait $ADMIN_PANEL_PID
