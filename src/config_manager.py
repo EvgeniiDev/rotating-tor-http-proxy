@@ -34,7 +34,6 @@ class ConfigManager:
             "ClientOnly 1",
             "UseMicrodescriptors 1",
             "MaxClientCircuitsPending 4",
-            "MaxOnionsPending 4",
             "NumEntryGuards 1",
             "UseEntryGuards 1",
             "DisableNetwork 0",
