@@ -20,39 +20,35 @@ HTTP Client → HTTP Load Balancer (Port 8080) → SOCKS5 Tor Instances → Inte
                 Admin Panel (Port 5000) 
 ```
 
+## Системные требования
+
+- **Операционная система**: Ubuntu 22.04 LTS
+- **Python**: 3.8+
+- **RAM**: минимум 1GB, рекомендуется 2GB+
+- **Дисковое пространство**: 500MB для установки
+- **Сеть**: доступ к интернету для загрузки Tor
+
 ## Быстрый старт
 
-### Вариант 1: Docker (рекомендуется)
+### Автоматическая установка на Ubuntu 22.04
 
 ```bash
 # Клонируем репозиторий
 git clone <repository>
 cd rotating-tor-http-proxy
 
-# Запускаем с новым балансировщиком
-docker-compose -f docker-compose_new.yml up -d
-
-# Проверяем логи
-docker logs tor-http-proxy-balancer
-
-# Открываем админ панель
-# http://localhost:5000
+# Автоматическая установка (создает systemd сервис)
+sudo ./install_ubuntu.sh
 ```
 
-### Вариант 4: Автоматическая установка (с systemd)
-
-```bash
-# Автоматическая установка (создает systemd сервис)
-./install_ubuntu.sh
-
-### Вариант 5: Управление через systemd
+### Управление через systemd
 
 ```bash
 # После установки через install_ubuntu.sh
-sudo systemctl start tor-proxy    # Запуск
-sudo systemctl stop tor-proxy     # Остановка
-sudo systemctl status tor-proxy   # Статус
-journalctl -u tor-proxy -f        # Логи
+sudo systemctl start tor-http-proxy    # Запуск
+sudo systemctl stop tor-http-proxy     # Остановка
+sudo systemctl status tor-http-proxy   # Статус
+journalctl -u tor-http-proxy -f        # Логи
 ```
 
 ## Использование
@@ -180,11 +176,11 @@ curl http://localhost:5000/api/balancer/stats | jq '.stats.proxy_ports'
 
 ### Логи
 ```bash
-# Docker логи
-docker logs tor-http-proxy-balancer
+# Логи systemd сервиса
+journalctl -u tor-http-proxy -f
 
-# Файл логов (при локальном запуске)
-tail -f tor_proxy.log
+# Файл логов (если настроен)
+tail -f /opt/tor-http-proxy/tor_proxy.log
 ```
 
 ## Производительность
@@ -209,6 +205,7 @@ tail -f tor_proxy.log
 | Конфигурация | Файлы конфигов | Автоматическая |
 | Зависимости | HAProxy + Privoxy | Только Python |
 | Мониторинг | Ограниченный | Полная статистика |
+| Развертывание | Ручная настройка | Автоматическая установка |
 
 ## Устранение проблем
 
@@ -217,8 +214,11 @@ tail -f tor_proxy.log
 # Проверяем порт
 netstat -tlnp | grep 8080
 
+# Проверяем статус сервиса
+sudo systemctl status tor-http-proxy
+
 # Проверяем логи
-docker logs tor-http-proxy-balancer
+journalctl -u tor-http-proxy -f
 ```
 
 ### Нет доступных прокси
@@ -245,3 +245,4 @@ curl -X POST http://localhost:5000/api/subnet/1.2/start -d '{"instances": 1}'
 ## Лицензия
 
 MIT License - смотрите файл LICENSE для деталей.
+`   
