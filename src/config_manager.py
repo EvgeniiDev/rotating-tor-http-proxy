@@ -10,7 +10,7 @@ class ConfigManager:
         self.base_tor_socks_port = 10000    # Tor SOCKS: 10000-19999
         self.base_tor_ctrl_port = 20000     # Tor Control: 20000-29999
         self.max_instances = 9999           # Максимально экземпляров в диапазоне
-        self.data_dir = '/opt/tor-http-proxy/.tor_proxy/data'
+        self.data_dir = os.path.expanduser('~/tor-http-proxy/.tor_proxy/data')
         
 
     def get_tor_config(self, instance_id: int, socks_port: int, ctrl_port: int,
