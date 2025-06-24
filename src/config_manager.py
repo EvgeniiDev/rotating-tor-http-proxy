@@ -19,21 +19,20 @@ class ConfigManager:
             raise ValueError("Subnet is required for Tor configuration")
             
         config_lines = [
-            f"# Tor Instance {instance_id}",
             f"SocksPort 127.0.0.1:{socks_port}",
-            f"PidFile {self.data_dir}/tor_{instance_id}.pid",
             "RunAsDaemon 0",
             f"DataDirectory {self.data_dir}/data_{instance_id}",
             "GeoIPFile /usr/share/tor/geoip",
             "GeoIPv6File /usr/share/tor/geoip6",
+            "Log warn syslog",
+            "SafeLogging 1",
             "NewCircuitPeriod 10",
             "MaxCircuitDirtiness 30",
             "ExitRelay 0",
             "RefuseUnknownExits 0",
             "ClientOnly 1",
             "UseMicrodescriptors 1",
-            "MaxClientCircuitsPending 16",
-            "EnforceDistinctSubnets 0",
+            "MaxClientCircuitsPending 8",
             f"ExitNodes {subnet}.0.0/16",
             "StrictNodes 1",
         ]
