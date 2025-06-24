@@ -5,6 +5,7 @@ set -e
 PROJECT_DIR="/opt/tor-http-proxy"
 SERVICE_NAME="tor-http-proxy"
 USER="tor-proxy"
+TOR_PROCESSES=50
 
 echo "=== Установка Tor HTTP Proxy на Ubuntu 22.04 ==="
 
@@ -17,7 +18,7 @@ echo "Обновление системы..."
 apt update && apt upgrade -y
 
 echo "Установка зависимостей..."
-apt install -y python3 python3-pip python3-venv tor obfs4proxy git curl
+apt install -y python3 python3-pip python3-venv tor git
 
 echo "Создание пользователя для сервиса..."
 if ! id "$USER" &>/dev/null; then
@@ -51,8 +52,6 @@ echo "Создание systemd сервиса..."
 cat > /etc/systemd/system/$SERVICE_NAME.service << EOF
 [Unit]
 Description=Tor HTTP Proxy with Load Balancer
-After=network.target
-Wants=network.target
 
 [Service]
 Type=simple
@@ -60,11 +59,11 @@ User=$USER
 Group=$USER
 WorkingDirectory=$PROJECT_DIR
 Environment=PYTHONPATH=$PROJECT_DIR
+Environment=TOR_PROCESSES=$TOR_PROCESSES
 ExecStart=$PROJECT_DIR/venv/bin/python $PROJECT_DIR/start_new.py
 Restart=always
 RestartSec=10
 MemoryAccounting=yes
-MemoryLimit=4G
 MemoryMax=4G
 
 [Install]
@@ -74,10 +73,6 @@ EOF
 echo "Перезагрузка systemd и включение сервиса..."
 systemctl daemon-reload
 systemctl enable $SERVICE_NAME
-
-echo "Настройка Tor..."
-mkdir -p /var/lib/tor-instances
-chown -R debian-tor:debian-tor /var/lib/tor-instances
 
 echo "=== Установка завершена! ==="
 echo ""
