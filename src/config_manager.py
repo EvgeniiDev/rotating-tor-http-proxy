@@ -25,7 +25,6 @@ class ConfigManager:
             "GeoIPFile /usr/share/tor/geoip",
             "GeoIPv6File /usr/share/tor/geoip6",
             "MaxCircuitDirtiness 10",
-            "CircuitBuildTimeout 5",
             "ExitRelay 0",
             "RefuseUnknownExits 0",
             "ClientOnly 1",
