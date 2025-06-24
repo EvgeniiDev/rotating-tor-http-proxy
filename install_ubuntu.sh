@@ -2,9 +2,9 @@
 
 set -e
 
-PROJECT_DIR="/opt/tor-http-proxy"
+PROJECT_DIR="$HOME/tor-http-proxy"
 SERVICE_NAME="tor-http-proxy"
-USER="tor-proxy"
+USER="$USER"
 TOR_PROCESSES=200
 
 echo "=== Installing Tor HTTP Proxy on Ubuntu 22.04 ==="
@@ -20,11 +20,6 @@ apt update && apt upgrade -y
 echo "Installing dependencies..."
 apt install -y python3 python3-pip python3-venv tor git
 
-echo "Creating service user..."
-if ! id "$USER" &>/dev/null; then
-    useradd -r -s /bin/false -d "$PROJECT_DIR" "$USER"
-fi
-
 echo "Creating project directory..."
 mkdir -p "$PROJECT_DIR"
 
@@ -38,15 +33,8 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 echo "Setting up Tor directories..."
-mkdir -p "$PROJECT_DIR/.tor_proxy/config"
 mkdir -p "$PROJECT_DIR/.tor_proxy/data"
-mkdir -p "$PROJECT_DIR/.tor_proxy/logs"
-chmod 755 "$PROJECT_DIR/.tor_proxy/config"
 chmod 755 "$PROJECT_DIR/.tor_proxy/data"
-chmod 755 "$PROJECT_DIR/.tor_proxy/logs"
-
-echo "Setting up permissions..."
-chown -R "$USER:$USER" "$PROJECT_DIR"
 
 echo "Creating systemd service..."
 cat > /etc/systemd/system/$SERVICE_NAME.service << EOF
