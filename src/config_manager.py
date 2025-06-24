@@ -1,21 +1,18 @@
 import logging
 import os
-from typing import Dict, Optional
+from typing import Dict
 
 logger = logging.getLogger(__name__)
 
 
 class ConfigManager:
-    def __init__(self, config_dir=None):
+    def __init__(self):
         self.base_tor_socks_port = 10000    # Tor SOCKS: 10000-19999
         self.base_tor_ctrl_port = 20000     # Tor Control: 20000-29999
         self.max_instances = 9999           # Максимально экземпляров в диапазоне
+        self.data_dir = '/opt/tor-http-proxy/.tor_proxy/data'
         
-        home_dir = os.path.expanduser("~")
-        self.config_dir = os.path.join(home_dir, ".tor_proxy", "config")
-        self.data_dir = os.path.join(home_dir, ".tor_proxy", "data")
-        self.log_dir = os.path.join(home_dir, ".tor_proxy", "logs")
-        
+
     def get_tor_config(self, instance_id: int, socks_port: int, ctrl_port: int,
         subnet: str) -> str:
         if not subnet:

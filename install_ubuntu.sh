@@ -38,12 +38,12 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 echo "Настройка директорий Tor..."
-mkdir -p ~/.tor_proxy/config
-mkdir -p ~/.tor_proxy/data
-mkdir -p ~/.tor_proxy/logs
-chmod 755 ~/.tor_proxy/config
-chmod 755 ~/.tor_proxy/data
-chmod 755 ~/.tor_proxy/logs
+mkdir -p "$PROJECT_DIR/.tor_proxy/config"
+mkdir -p "$PROJECT_DIR/.tor_proxy/data"
+mkdir -p "$PROJECT_DIR/.tor_proxy/logs"
+chmod 755 "$PROJECT_DIR/.tor_proxy/config"
+chmod 755 "$PROJECT_DIR/.tor_proxy/data"
+chmod 755 "$PROJECT_DIR/.tor_proxy/logs"
 
 echo "Настройка прав доступа..."
 chown -R "$USER:$USER" "$PROJECT_DIR"
