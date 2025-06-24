@@ -64,7 +64,7 @@ class ConfigManager:
             subnet
         )
         
-        config_path = os.path.join(self.config_dir, f'torrc.{instance_id}')
+        config_path = os.path.join(self.data_dir, f'torrc.{instance_id}')
         
         try:
             with open(config_path, 'w') as f:
