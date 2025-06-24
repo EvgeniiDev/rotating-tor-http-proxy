@@ -1,5 +1,8 @@
 Flask==3.0.0
 Flask-SocketIO==5.3.6
 requests==2.31.0
+requests[socks]==2.31.0
 python-socketio==5.9.0
 eventlet==0.33.3
+PySocks==1.7.1
+git+https://github.com/EvgeniiDev/proxy-load-balancer.git
