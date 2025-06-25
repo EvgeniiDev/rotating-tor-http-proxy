@@ -6,7 +6,6 @@ import requests
 from typing import List, Dict, Optional, Any
 from proxy_load_balancer.balancer import ProxyBalancer
 from proxy_load_balancer.monitor import ProxyMonitor
-from statistics_manager import StatisticsManager
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +15,6 @@ class HTTPLoadBalancer:
         self.listen_port = listen_port
         self.proxy_balancer: Optional[ProxyBalancer] = None
         self.proxy_monitor: Optional[ProxyMonitor] = None
-        self.stats_manager = StatisticsManager()
         self.config = {
             "server": {
                 "host": "0.0.0.0",
@@ -41,7 +39,6 @@ class HTTPLoadBalancer:
             
             self.proxy_ports.append(port)
             self.config["proxies"].append(proxy_config)
-            self.stats_manager.add_proxy(port)
             
             if self.proxy_balancer:
                 self.proxy_balancer.update_proxies(self.config)
@@ -53,8 +50,6 @@ class HTTPLoadBalancer:
 
             self.proxy_ports.remove(port)
             self.config["proxies"] = [p for p in self.config["proxies"] if p["port"] != port]
-                
-            self.stats_manager.remove_proxy(port)
             
             if self.proxy_balancer:
                 self.proxy_balancer.update_proxies(self.config)
@@ -106,11 +101,8 @@ class HTTPLoadBalancer:
             return {
                 'total_proxies': len(self.proxy_ports),
                 'listen_port': self.listen_port,
-                'proxy_stats': self.stats_manager.get_all_stats()
+                'proxy_ports': self.proxy_ports
             }
-
-    def mark_proxy_success(self, port: int):
-        self.stats_manager.record_request(port, True, 200)
 
     def get_proxy_session(self, port: int):
         session = requests.Session()
