@@ -26,7 +26,10 @@ class TorNetworkManager:
         
         self.relay_manager = TorRelayManager()
         self.process_manager = TorProcessManager(self.config_manager, load_balancer)
-        self.health_monitor = TorHealthMonitor(self._restart_tor_instance_by_port)
+        self.health_monitor = TorHealthMonitor(
+            self._restart_tor_instance_by_port,
+            get_available_subnets_callback=self._get_available_subnets_for_health_monitor
+        )
         
         self.stats = {
             'active_subnets': 0,
@@ -311,6 +314,31 @@ class TorNetworkManager:
             tor_stats['health_monitoring'] = health_stats
             
         return tor_stats
+
+    def _get_available_subnets_for_health_monitor(self, count=1, exclude=None):
+        exclude = exclude or set()
+        available_subnets = self.get_available_subnets(count * 2)
+        
+        filtered_subnets = []
+        for subnet in available_subnets:
+            if subnet not in exclude and subnet not in self.active_subnets:
+                filtered_subnets.append(subnet)
+                if len(filtered_subnets) >= count:
+                    break
+        
+        if not filtered_subnets and not available_subnets:
+            relay_data = self.fetch_tor_relays()
+            if relay_data:
+                self.extract_relay_ips(relay_data)
+                available_subnets = self.get_available_subnets(count * 2)
+                
+                for subnet in available_subnets:
+                    if subnet not in exclude and subnet not in self.active_subnets:
+                        filtered_subnets.append(subnet)
+                        if len(filtered_subnets) >= count:
+                            break
+        
+        return filtered_subnets[:count]
 
     def _restart_tor_instance_by_port(self, port, subnet):
         return self.process_manager.restart_instance_by_port(port, subnet)
