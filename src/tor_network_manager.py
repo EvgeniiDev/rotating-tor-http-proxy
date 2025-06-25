@@ -1,13 +1,14 @@
 import time
 import logging
 import threading
-import subprocess
-import requests
 from datetime import datetime
 from collections import defaultdict
 
 from config_manager import ConfigManager
 from models import ServiceStatus, get_current_timestamp
+from tor_health_monitor import TorHealthMonitor
+from tor_relay_manager import TorRelayManager
+from tor_process_manager import TorProcessManager
 
 logger = logging.getLogger(__name__)
 
@@ -16,19 +17,17 @@ class TorNetworkManager:
     def __init__(self, socketio, load_balancer):
         self.active_subnets = set()
         self.subnet_limits = {}
-        self.tor_instances = []
         self.monitoring = True
-        self.current_relays = {}
         self.services_started = False
-        self.tor_processes = {}
-        self.subnet_tor_processes = {}
         self.load_balancer = load_balancer
         self.config_manager = ConfigManager()
-        self.next_instance_id = 1
         self.socketio = socketio
-        self._subnet_lock = threading.RLock()  # Используем RLock для поддержки recursive locking
-        # Словарь для отслеживания соответствия instance_id → SOCKS5 port
-        self.instance_ports = {}
+        self._subnet_lock = threading.RLock()
+        
+        self.relay_manager = TorRelayManager()
+        self.process_manager = TorProcessManager(self.config_manager, load_balancer)
+        self.health_monitor = TorHealthMonitor(self._restart_tor_instance_by_port)
+        
         self.stats = {
             'active_subnets': 0,
             'blocked_subnets': 0,
@@ -38,75 +37,15 @@ class TorNetworkManager:
         }
 
     def fetch_tor_relays(self):
-        """Fetch current Tor relay information"""
-        try:
-            url = "https://onionoo.torproject.org/details?type=relay&running=true&fields=or_addresses,country,exit_probability"
-            response = requests.get(url, timeout=30)
-            return response.json() if response.status_code == 200 else None
-        except Exception as e:
-            logger.error(f"Error fetching Tor relays: {e}")
-            return None
+        return self.relay_manager.fetch_tor_relays()
 
     def extract_relay_ips(self, relay_data):
-        """Extract IP addresses from relay data and filter by exit probability"""
-        relays = []
-        if not relay_data or 'relays' not in relay_data:
-            return relays
-
-        # First pass: collect all relays with their subnet information
-        subnet_relays = defaultdict(list)
-
-        for relay in relay_data['relays']:
-            if 'or_addresses' in relay:
-                for addr in relay['or_addresses']:
-                    ip = addr.split(':')[0]
-                    if ':' not in ip:
-                        ip_parts = ip.split('.')
-                        if len(ip_parts) >= 2:
-                            subnet = f"{ip_parts[0]}.{ip_parts[1]}"
-                            exit_prob = relay.get('exit_probability', 0)
-                            # Convert to float if it's not already
-                            if isinstance(exit_prob, str):
-                                try:
-                                    exit_prob = float(exit_prob)
-                                except (ValueError, TypeError):
-                                    exit_prob = 0
-
-                            relay_info = {
-                                'ip': ip,
-                                'country': relay.get('country', 'Unknown'),
-                                'exit_probability': exit_prob
-                            }
-                            subnet_relays[subnet].append(relay_info)
-
-        # если у ноды exit_probability = 0, то это промежуточный узел
-        valid_subnets = set()
-        for subnet, subnet_relay_list in subnet_relays.items():
-            if any(relay['exit_probability'] > 0 for relay in subnet_relay_list):
-                valid_subnets.add(subnet)
-
-        # Third pass: collect only relays from valid subnets
-        for subnet in valid_subnets:
-            relays.extend(subnet_relays[subnet])
-
-        logger.info(
-            f"Filtered to {len(valid_subnets)} subnets with exit probability > 0")
-        
-        self.available_subnets = sorted(list(valid_subnets))
-        
-        return relays
+        return self.relay_manager.extract_relay_ips(relay_data)
 
     def get_available_subnets(self, count=None):
-        if not hasattr(self, 'available_subnets'):
-            self.available_subnets = []
-        
-        if count is None:
-            return self.available_subnets
-        
-        return self.available_subnets[:count]
+        return self.relay_manager.get_available_subnets(count)
 
     def start_services(self, auto_start_count=None):
-        """Initialize infrastructure without starting Tor instances"""
         if self.services_started:
             logger.info("Services infrastructure already initialized")
             return True
@@ -115,6 +54,8 @@ class TorNetworkManager:
         self.services_started = True
         self.stats['tor_instances'] = 0
         self.update_running_instances_count()
+        
+        self.health_monitor.start()
 
         logger.info("Services infrastructure initialized successfully.")
         
@@ -150,16 +91,15 @@ class TorNetworkManager:
             
             for i, subnet in enumerate(batch_subnets):
                 try:
-                    instance_id = self.next_instance_id
-                    self.next_instance_id += 1
+                    instance_id = self.process_manager.get_next_available_id()
                     
-                    process = self._start_tor_instance(instance_id, subnet)
-                    if process:
-                        self.tor_processes[instance_id] = process
+                    port = self.process_manager.start_tor_instance(subnet)
+                    if port:
+                        self.health_monitor.add_instance(port, subnet)
                         total_started += 1
-                        logger.info(f"Started Tor instance {instance_id} with subnet {subnet}")
+                        logger.info(f"Started Tor instance on port {port} with subnet {subnet}")
                     else:
-                        logger.warning(f"Failed to start Tor instance {instance_id} with subnet {subnet}")
+                        logger.warning(f"Failed to start Tor instance with subnet {subnet}")
                 except Exception as e:
                     logger.error(f"Error starting Tor instance {batch_start + i + 1} with subnet {subnet}: {e}")
             
@@ -170,65 +110,32 @@ class TorNetworkManager:
         logger.info(f"Auto-start completed: {total_started}/{count} instances started successfully")
 
     def stop_services(self):
-        """Stop all Tor instances"""
         with self._subnet_lock:
-            # Останавливаем основные процессы Tor
-            for process in self.tor_processes.values():
-                if process and process.poll() is None:
-                    process.terminate()
-
-            # Останавливаем subnet процессы Tor
-            subnet_processes_copy = dict(self.subnet_tor_processes)
-            for processes in subnet_processes_copy.values():
-                for process in processes.values():
-                    if process and process.poll() is None:
-                        process.terminate()
-
-            # Удаляем все SOCKS5 прокси из HTTP балансировщика
-            for instance_id, port in self.instance_ports.items():
-                self.load_balancer.remove_proxy(port)
-                logger.info(f"Removed SOCKS5 proxy port {port} from HTTP load balancer")
-
-            # Очищаем все данные
-            self.tor_processes.clear()
-            self.subnet_tor_processes.clear()
+            self.health_monitor.stop()
+            self.process_manager.stop_all_instances()
+            
             self.active_subnets.clear()
-            self.instance_ports.clear()
+            self.subnet_limits.clear()
+            self.health_monitor.clear()
             
             self.services_started = False
             self.update_running_instances_count()
             logger.info("All services stopped and HTTP load balancer cleared")
             return True
 
-    def _count_running_instances(self):
-        """Count running instances for both main and subnet processes"""
-        running_main = sum(
-            1 for p in self.tor_processes.values() if p and p.poll() is None)
-        running_subnet = sum(
-            sum(1 for p in processes.values() if p and p.poll() is None)
-            for processes in self.subnet_tor_processes.values()
-        )
-        return running_main, running_subnet
+    def update_running_instances_count(self):
+        running_main, running_subnet = self.process_manager.count_running_instances()
+        self.stats['running_instances'] = running_main + running_subnet
+        self.stats['tor_instances'] = running_main + running_subnet
 
     def get_service_status(self):
-        """Check status of all running services"""
-        running_main, running_subnet = self._count_running_instances()
+        running_main, running_subnet = self.process_manager.count_running_instances()
         total_running = running_main + running_subnet
-
-        failed_instances = []
-        for instance_id, process in self.tor_processes.items():
-            if not (process and process.poll() is None):
-                failed_instances.append(f"tor-{instance_id}")
-
-        for subnet_key, processes in self.subnet_tor_processes.items():
-            for instance_id, process in processes.items():
-                if not (process and process.poll() is None):
-                    failed_instances.append(f"subnet-tor-{instance_id}")
+        failed_instances = self.process_manager.get_failed_instances()
 
         status = ServiceStatus(
             services_started=self.services_started,
-            total_instances=len(self.tor_processes) + sum(len(p)
-                                                          for p in self.subnet_tor_processes.values()),
+            total_instances=len(self.process_manager.get_all_ports()),
             running_tor=total_running,
             running_socks=total_running,
             failed_instances=failed_instances,
@@ -237,34 +144,27 @@ class TorNetworkManager:
         return status.to_dict()
 
     def update_subnet_stats(self):
-        """Update subnet statistics"""
-        if not self.current_relays:
+        relays = self.relay_manager.current_relays
+        if not relays:
             relay_data = self.fetch_tor_relays()
             if relay_data:
-                self.current_relays = self.extract_relay_ips(relay_data)
+                relays = self.extract_relay_ips(relay_data)
 
         subnet_counts = defaultdict(int)
-        for relay in self.current_relays or []:
+        for relay in relays or []:
             ip_parts = relay['ip'].split('.')
             if len(ip_parts) >= 2:
                 subnet = f"{ip_parts[0]}.{ip_parts[1]}"
                 subnet_counts[subnet] += 1
 
-        # Count active subnets (those with running instances)
         active_count = sum(
             1 for subnet in subnet_counts if subnet in self.active_subnets)
 
-        # Count subnets with running instances
         occupied_count = 0
         free_count = 0
 
         for subnet in subnet_counts:
-            subnet_key = f"subnet_{subnet.replace('.', '_')}"
-            running_instances = len([
-                p for p in self.subnet_tor_processes.get(subnet_key, {}).values()
-                if p and p.poll() is None
-            ])
-
+            running_instances = self.process_manager.get_subnet_running_instances(subnet)
             if running_instances > 0:
                 occupied_count += 1
             else:
@@ -282,37 +182,17 @@ class TorNetworkManager:
         })
 
     def emit_subnet_data(self, relays):
-        """Emit subnet information to WebSocket clients"""
         if not self.socketio:
             return
 
-        subnet_counts = defaultdict(int)
-        subnet_details = defaultdict(list)
-
-        for relay in relays:
-            ip_parts = relay['ip'].split('.')
-            if len(ip_parts) >= 2:
-                subnet = f"{ip_parts[0]}.{ip_parts[1]}"
-                subnet_counts[subnet] += 1
-                subnet_details[subnet].append({
-                    'ip': relay['ip'],
-                    'country': relay['country'],
-                    'exit_probability': relay['exit_probability']
-                })
-
-        sorted_subnets = sorted(subnet_counts.items(),
-                                key=lambda x: x[1], reverse=True)
+        subnet_counts, subnet_details = self.relay_manager.get_subnet_details()
+        sorted_subnets = sorted(subnet_counts.items(), key=lambda x: x[1], reverse=True)
 
         subnet_data = []
         for subnet, count in sorted_subnets:
             status = 'active' if subnet in self.active_subnets else 'available'
             limit = self.subnet_limits.get(subnet, 1)
-
-            subnet_key = f"subnet_{subnet.replace('.', '_')}"
-            running_instances = len([
-                p for p in self.subnet_tor_processes.get(subnet_key, {}).values()
-                if p and p.poll() is None
-            ])
+            running_instances = self.process_manager.get_subnet_running_instances(subnet)
 
             subnet_data.append({
                 'subnet': subnet,
@@ -337,13 +217,11 @@ class TorNetworkManager:
         })
 
     def start_monitoring(self):
-        """Start monitoring Tor relays and subnet information"""
         def monitor():
             while self.monitoring:
                 relay_data = self.fetch_tor_relays()
                 if relay_data:
                     relays = self.extract_relay_ips(relay_data)
-                    self.current_relays = relays
                     self.update_subnet_stats()
                     self.emit_subnet_data(relays)
                     logger.info(f"Fetched {len(relays)} Tor relay IPs")
@@ -362,125 +240,48 @@ class TorNetworkManager:
     def stop_monitoring(self):
         self.monitoring = False
 
-    def _start_tor_instance(self, instance_id, subnet=None):
-        tor_config_result = self.config_manager.create_tor_config(instance_id, subnet)
-        tor_cmd = ['tor', '-f', tor_config_result['config_path']]
-
-        logger.info(f"Starting Tor instance {instance_id} for subnet {subnet}")
-
-        process = subprocess.Popen(
-            tor_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-
-        port = tor_config_result['socks_port']
-        # Сохраняем соответствие instance_id → SOCKS5 port
-        self.instance_ports[instance_id] = port
-        # Добавляем SOCKS5 прокси в HTTP балансировщик
-        self.load_balancer.add_proxy(port)
-        logger.info(f"Started Tor instance {instance_id} on socks5 port {port}, добавлен в HTTP балансировщик")
-        return process
-
-
     def _start_subnet_tor_internal(self, subnet, instances_count=1):
-        subnet_key = f"subnet_{subnet.replace('.', '_')}"
-
-        if subnet_key not in self.subnet_tor_processes:
-            self.subnet_tor_processes[subnet_key] = {}
-
-        self.subnet_limits[subnet] = instances_count
-
-        for i in range(instances_count):
-            instance_id = self.get_next_available_id()
-            process = self._start_tor_instance(instance_id, subnet)
-
-            if process:
-                self.subnet_tor_processes[subnet_key][instance_id] = process
-            else:
-                logger.error(f"Не удалось запустить Tor instance {instance_id} для подсети {subnet}")
-                return False
-
-        self.active_subnets.add(subnet)
-        self.update_running_instances_count()
-        logger.info(f"Запущено {instances_count} Tor instances для подсети {subnet}")
-        return True
+        success, started_ports = self.process_manager.start_subnet_instances(subnet, instances_count)
+        
+        if success:
+            for port in started_ports:
+                self.health_monitor.add_instance(port, subnet)
+            
+            self.active_subnets.add(subnet)
+            self.subnet_limits[subnet] = instances_count
+            self.update_running_instances_count()
+            logger.info(f"Started {instances_count} Tor instances for subnet {subnet}")
+        
+        return success
 
     def start_subnet_tor(self, subnet, instances_count=1):
         with self._subnet_lock:
             return self._start_subnet_tor_internal(subnet, instances_count)
 
     def _stop_subnet_tor_internal(self, subnet):
-        subnet_key = f"subnet_{subnet.replace('.', '_')}"
-
-        if subnet_key in self.subnet_tor_processes:
-            subnet_processes = list(self.subnet_tor_processes[subnet_key].items())
-            for instance_id, process in subnet_processes:
-                if process and process.poll() is None:
-                    process.terminate()
-                    logger.info(f"Stopped Tor instance {instance_id} for subnet {subnet}")
-
-                # Удаляем SOCKS5 прокси из HTTP балансировщика
-                if instance_id in self.instance_ports:
-                    port = self.instance_ports[instance_id]
-                    self.load_balancer.remove_proxy(port)
-                    del self.instance_ports[instance_id]
-                    logger.info(f"Removed SOCKS5 proxy port {port} from HTTP load balancer")
-
-            del self.subnet_tor_processes[subnet_key]
-
-        self.active_subnets.discard(subnet)
-        self.subnet_limits.pop(subnet, None)
-        self.update_running_instances_count()
-        logger.info(f"Stopped all instances for subnet {subnet}")
-        return True
+        success = self.process_manager.stop_subnet_instances(subnet)
+        
+        if success:
+            self.active_subnets.discard(subnet)
+            self.subnet_limits.pop(subnet, None)
+            self.update_running_instances_count()
+        
+        return success
 
     def stop_subnet_tor(self, subnet):
-        """Stop Tor instances for a specific subnet"""
         with self._subnet_lock:
             return self._stop_subnet_tor_internal(subnet)
 
     def restart_subnet_tor(self, subnet, instances_count=1):
-        """Restart Tor instances for a subnet"""
         with self._subnet_lock:
             self._stop_subnet_tor_internal(subnet)
             time.sleep(2)
             return self._start_subnet_tor_internal(subnet, instances_count)
-    def update_running_instances_count(self):
-        """Update the count of running instances"""
-        running_main = sum(
-            1 for p in self.tor_processes.values() if p and p.poll() is None)
-
-        # Create a copy to safely iterate in case of concurrent modification
-        subnet_processes_copy = dict(self.subnet_tor_processes)
-        running_subnet = sum(
-            sum(1 for p in processes.values() if p and p.poll() is None)
-            for processes in subnet_processes_copy.values()
-        )
-        self.stats['running_instances'] = running_main + running_subnet
-        self.stats['tor_instances'] = running_main + running_subnet
-
-    def get_next_available_id(self):
-        """Get the next available instance ID - thread safe"""
-        with self._subnet_lock:
-            current_id = self.next_instance_id
-            self.next_instance_id += 1
-            return current_id
 
     def get_subnet_running_instances(self, subnet):
-        subnet_key = f"subnet_{subnet.replace('.', '_')}"
-        subnet_processes_copy = dict(self.subnet_tor_processes)
-
-        if subnet_key in subnet_processes_copy:
-            return len([
-                p for p in subnet_processes_copy[subnet_key].values()
-                if p and p.poll() is None
-            ])
-        return 0
+        return self.process_manager.get_subnet_running_instances(subnet)
 
     def get_load_balancer_stats(self):
-        """Получить статистику HTTP балансировщика"""
         try:
             return self.load_balancer.get_stats()
         except Exception as e:
@@ -488,12 +289,11 @@ class TorNetworkManager:
             return {}
 
     def get_comprehensive_stats(self):
-        """Получить полную статистику Tor Network Manager и HTTP Load Balancer"""
         tor_stats = {
             'tor_network': {
                 'services_started': self.services_started,
                 'active_subnets': len(self.active_subnets),
-                'total_instances': len(self.instance_ports),
+                'total_instances': len(self.process_manager.get_all_ports()),
                 'running_instances': self.stats.get('running_instances', 0),
                 'tor_instances': self.stats.get('tor_instances', 0),
                 'subnet_limits': dict(self.subnet_limits),
@@ -502,9 +302,18 @@ class TorNetworkManager:
             }
         }
         
-        # Добавляем статистику HTTP балансировщика
         lb_stats = self.get_load_balancer_stats()
         if lb_stats:
             tor_stats['http_load_balancer'] = lb_stats
+        
+        health_stats = self.health_monitor.get_stats()
+        if health_stats:
+            tor_stats['health_monitoring'] = health_stats
             
         return tor_stats
+
+    def _restart_tor_instance_by_port(self, port, subnet):
+        return self.process_manager.restart_instance_by_port(port, subnet)
+
+    def get_health_stats(self):
+        return self.health_monitor.get_stats()
