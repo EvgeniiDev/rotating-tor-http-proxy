@@ -35,6 +35,7 @@ class AdminPanel:
         self.app.route('/api/subnet/<subnet>/limit', methods=['PUT'])(self.set_subnet_limit)
         self.app.route('/api/subnet/<subnet>/instances', methods=['PUT'])(self.set_subnet_instances)
         self.app.route('/api/stats/comprehensive')(self.get_comprehensive_stats)
+        self.app.route('/api/health/stats')(self.get_health_stats)
     
     def _handle_service_operation(self, operation_name, operation_func, *args):
         """Обработчик операций с сервисами"""
@@ -200,3 +201,12 @@ class AdminPanel:
         except Exception as e:
             logger.error(f"Error getting comprehensive stats: {e}")
             return jsonify(create_error_response(f'Failed to get stats: {str(e)}')), 500
+
+    def get_health_stats(self):
+        """Получить статистику здоровья Tor инстансов"""
+        try:
+            health_stats = self.tor_manager.get_health_stats()
+            return jsonify(create_success_response('Health stats retrieved successfully', health_stats))
+        except Exception as e:
+            logger.error(f"Error getting health stats: {e}")
+            return jsonify(create_error_response(f'Failed to get health stats: {str(e)}')), 500
