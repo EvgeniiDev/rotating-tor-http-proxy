@@ -33,8 +33,8 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 echo "Setting up Tor directories..."
-mkdir -p "$PROJECT_DIR/.tor_proxy/data"
-chmod 755 "$PROJECT_DIR/.tor_proxy/data"
+mkdir -p "$PROJECT_DIR/data"
+chmod 755 "$PROJECT_DIR/data"
 
 echo "Creating systemd service..."
 cat > /etc/systemd/system/$SERVICE_NAME.service << EOF
