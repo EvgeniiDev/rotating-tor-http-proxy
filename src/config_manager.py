@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 class ConfigManager:
     def __init__(self):
-        self.data_dir = os.path.expanduser('~/tor-http-proxy/.tor_proxy/data')
+        self.data_dir = os.path.expanduser('~/tor-http-proxy/data')
         
     def create_tor_config_by_port(self, socks_port: int, subnet: str) -> Dict:
         if not subnet:
