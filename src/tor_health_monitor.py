@@ -140,7 +140,6 @@ class TorHealthMonitor:
                                                     del self.instance_health[port]
                                                     health_monitor.port = new_port
                                                     self.instance_health[new_port] = health_monitor
-                                        continue
                                     else:
                                         logger.error(f"No available subnets for changing subnet for port {port}")
                                 except Exception as e:
