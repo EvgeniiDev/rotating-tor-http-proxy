@@ -94,8 +94,6 @@ class TorNetworkManager:
             
             for i, subnet in enumerate(batch_subnets):
                 try:
-                    instance_id = self.process_manager.get_next_available_id()
-                    
                     port = self.process_manager.start_tor_instance(subnet)
                     if port:
                         self.health_monitor.add_instance(port, subnet)
