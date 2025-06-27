@@ -85,13 +85,13 @@ class AdminPanel:
 
     def get_subnets(self):
         """Получение списка подсетей"""
-        if not self.tor_manager.current_relays:
+        if not self.tor_manager.relay_manager.current_relays:
             relay_data = self.tor_manager.fetch_tor_relays()
             if relay_data:
-                self.tor_manager.current_relays = self.tor_manager.extract_relay_ips(relay_data)
+                self.tor_manager.relay_manager.current_relays = self.tor_manager.extract_relay_ips(relay_data)
 
         subnet_counts = defaultdict(int)
-        for relay in self.tor_manager.current_relays or []:
+        for relay in self.tor_manager.relay_manager.current_relays or []:
             ip_parts = relay['ip'].split('.')
             if len(ip_parts) >= 2:
                 subnet = f"{ip_parts[0]}.{ip_parts[1]}"
