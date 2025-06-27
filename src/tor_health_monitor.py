@@ -2,6 +2,7 @@ import time
 import logging
 import threading
 import requests
+import concurrent.futures
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ class TorInstanceHealth:
         self.max_restarts = 3
         self.last_check = None
         self.last_restart = None
-        self.check_timeout = 30
+        self.check_timeout = 15
         self.lock = threading.Lock()
     
     def check_health(self):
@@ -83,7 +84,7 @@ class TorInstanceHealth:
 
 
 class TorHealthMonitor:
-    def __init__(self, restart_callback, check_interval=10, get_available_subnets_callback=None):
+    def __init__(self, restart_callback, check_interval=30, get_available_subnets_callback=None):
         self.instance_health = {}
         self.health_check_running = True
         self.restart_callback = restart_callback
@@ -111,62 +112,41 @@ class TorHealthMonitor:
                 with self._lock:
                     instances_to_check = list(self.instance_health.items())
                 
-                for port, health_monitor in instances_to_check:
-                    if not self.health_check_running:
-                        break
+                if not instances_to_check:
+                    time.sleep(self.check_interval)
+                    continue
+                
+                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                    future_to_port = {
+                        executor.submit(health_monitor.check_health): port
+                        for port, health_monitor in instances_to_check
+                    }
                     
-                    if health_monitor.check_health():
-                        continue
-                    
-                    if health_monitor.should_restart():
-                        current_subnet = health_monitor.subnet
-                        
-                        if health_monitor.should_change_subnet():
-                            logger.warning(f"Port {port} failed {health_monitor.max_restarts} restarts, changing subnet")
+                    try:
+                        for future in concurrent.futures.as_completed(future_to_port, timeout=20):
+                            port = future_to_port[future]
                             
-                            if self.get_available_subnets_callback:
-                                try:
-                                    used_subnets = {hm.subnet for hm in self.instance_health.values()}
-                                    available_subnets = self.get_available_subnets_callback(1, exclude=used_subnets)
-                                    
-                                    if available_subnets:
-                                        new_subnet = available_subnets[0]
-                                        health_monitor.change_subnet(new_subnet)
-                                        
-                                        if self.restart_callback:
-                                            new_port = self.restart_callback(port, new_subnet)
-                                            if new_port and new_port != port:
-                                                with self._lock:
-                                                    del self.instance_health[port]
-                                                    health_monitor.port = new_port
-                                                    self.instance_health[new_port] = health_monitor
-                                    else:
-                                        logger.error(f"No available subnets for changing subnet for port {port}")
-                                except Exception as e:
-                                    logger.error(f"Failed to change subnet for port {port}: {e}")
-                            else:
-                                logger.warning(f"No subnet provider callback available for port {port}")
-                        
-                        logger.warning(f"Port {port} failed {health_monitor.max_failures} health checks, restarting")
-                        
-                        try:
-                            health_monitor.mark_restart()
+                            if not self.health_check_running:
+                                break
                             
-                            with self._lock:
-                                if current_subnet not in self.subnet_restart_counts:
-                                    self.subnet_restart_counts[current_subnet] = 0
-                                self.subnet_restart_counts[current_subnet] += 1
-                            
-                            if self.restart_callback:
-                                new_port = self.restart_callback(port, current_subnet)
-                                if new_port and new_port != port:
-                                    with self._lock:
-                                        del self.instance_health[port]
-                                        health_monitor.port = new_port
-                                        self.instance_health[new_port] = health_monitor
+                            try:
+                                health_ok = future.result()
+                                if health_ok:
+                                    continue
                                 
-                        except Exception as e:
-                            logger.error(f"Failed to restart instance on port {port}: {e}")
+                                with self._lock:
+                                    if port not in self.instance_health:
+                                        continue
+                                    health_monitor = self.instance_health[port]
+                                
+                                if health_monitor.should_restart():
+                                    self._handle_restart(port, health_monitor)
+                                    
+                            except Exception as e:
+                                logger.error(f"Health check failed for port {port}: {e}")
+                                
+                    except concurrent.futures.TimeoutError:
+                        logger.warning("Some health checks timed out, continuing...")
                 
                 time.sleep(self.check_interval)
                 
@@ -175,6 +155,56 @@ class TorHealthMonitor:
                 time.sleep(10)
         
         logger.info("Health check worker stopped")
+    
+    def _handle_restart(self, port, health_monitor):
+        current_subnet = health_monitor.subnet
+        
+        if health_monitor.should_change_subnet():
+            logger.warning(f"Port {port} failed {health_monitor.max_restarts} restarts, changing subnet")
+            
+            if self.get_available_subnets_callback:
+                try:
+                    used_subnets = {hm.subnet for hm in self.instance_health.values()}
+                    available_subnets = self.get_available_subnets_callback(1, exclude=used_subnets)
+                    
+                    if available_subnets:
+                        new_subnet = available_subnets[0]
+                        health_monitor.change_subnet(new_subnet)
+                        
+                        if self.restart_callback:
+                            new_port = self.restart_callback(port, new_subnet)
+                            if new_port and new_port != port:
+                                with self._lock:
+                                    del self.instance_health[port]
+                                    health_monitor.port = new_port
+                                    self.instance_health[new_port] = health_monitor
+                    else:
+                        logger.error(f"No available subnets for changing subnet for port {port}")
+                except Exception as e:
+                    logger.error(f"Failed to change subnet for port {port}: {e}")
+            else:
+                logger.warning(f"No subnet provider callback available for port {port}")
+        
+        logger.warning(f"Port {port} failed {health_monitor.max_failures} health checks, restarting")
+        
+        try:
+            health_monitor.mark_restart()
+            
+            with self._lock:
+                if current_subnet not in self.subnet_restart_counts:
+                    self.subnet_restart_counts[current_subnet] = 0
+                self.subnet_restart_counts[current_subnet] += 1
+            
+            if self.restart_callback:
+                new_port = self.restart_callback(port, current_subnet)
+                if new_port and new_port != port:
+                    with self._lock:
+                        del self.instance_health[port]
+                        health_monitor.port = new_port
+                        self.instance_health[new_port] = health_monitor
+                        
+        except Exception as e:
+            logger.error(f"Failed to restart instance on port {port}: {e}")
     
     def start(self):
         if hasattr(self, '_health_thread') and self._health_thread.is_alive():
