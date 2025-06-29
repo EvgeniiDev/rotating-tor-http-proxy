@@ -186,17 +186,19 @@ class TorProcessManager:
         all_nodes = list(set().union(*exit_nodes_list))
         num_processes = len(exit_nodes_list)
         total_nodes = len(all_nodes)
-        base_nodes_per_process = total_nodes // num_processes
+        
+        if total_nodes == 0:
+            logger.error("No exit nodes available for distribution")
+            return []
+        
+        min_nodes_per_process = 1
+        base_nodes_per_process = max(1, total_nodes // num_processes)
         extra_nodes = total_nodes % num_processes
-        min_nodes_per_process = max(3, base_nodes_per_process)
         
         official_nodes = [ip for ip in all_nodes if ip in self._tor_exit_nodes]
         unofficial_nodes = [ip for ip in all_nodes if ip not in self._tor_exit_nodes]
         
         logger.info(f"Distributing {len(official_nodes)} official + {len(unofficial_nodes)} unofficial nodes among {num_processes} processes")
-        
-        if base_nodes_per_process < min_nodes_per_process:
-            logger.warning(f"Not enough nodes for even distribution: {total_nodes} total / {num_processes} processes")
         
         distributed_lists = []
         all_available_nodes = official_nodes + unofficial_nodes
@@ -214,6 +216,8 @@ class TorProcessManager:
                 logger.info(f"Process {i+1}: {official_count} official + {unofficial_count} unofficial = {len(process_nodes)} total nodes")
             else:
                 logger.warning(f"Process {i+1}: insufficient nodes ({len(process_nodes)}/{min_nodes_per_process}), skipping")
+        
+        return distributed_lists
         
     def start_tor_instances_batch(self, exit_nodes_list: List[List[str]], batch_size: int = 3) -> List[dict]:
         total_instances = len(exit_nodes_list)
