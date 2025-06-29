@@ -92,11 +92,13 @@ class TorNetworkManager:
             
             logger.info(f"Starting batch {batch_start//batch_size + 1}: instances {batch_start + 1}-{batch_end}")
             
+            batch_ports = []
             for i, subnet in enumerate(batch_subnets):
                 try:
                     port = self.process_manager.start_tor_instance(subnet)
                     if port:
                         self.health_monitor.add_instance(port, subnet)
+                        batch_ports.append(port)
                         total_started += 1
                         logger.info(f"Started Tor instance on port {port} with subnet {subnet}")
                     else:
@@ -104,11 +106,33 @@ class TorNetworkManager:
                 except Exception as e:
                     logger.error(f"Error starting Tor instance {batch_start + i + 1} with subnet {subnet}: {e}")
             
-            if batch_end < count:
-                logger.info(f"Batch {batch_start//batch_size + 1} completed. Waiting 20 seconds before next batch...")
-                time.sleep(20)
+            if batch_end < count and batch_ports:
+                logger.info(f"Batch {batch_start//batch_size + 1} completed. Waiting for instances to be ready...")
+                self._wait_for_batch_ready(batch_ports)
         
         logger.info(f"Auto-start completed: {total_started}/{count} instances started successfully")
+
+    def _wait_for_batch_ready(self, batch_ports, max_wait_time=120, check_interval=2):
+        start_time = time.time()
+        
+        while time.time() - start_time < max_wait_time:
+            ready_ports = []
+            for port in batch_ports:
+                if self.health_monitor.is_instance_ready(port):
+                    ready_ports.append(port)
+            
+            if len(ready_ports) == len(batch_ports):
+                logger.info(f"All {len(batch_ports)} instances in batch are ready")
+                return True
+            
+            if len(ready_ports) > 0:
+                logger.info(f"{len(ready_ports)}/{len(batch_ports)} instances ready, waiting for remaining...")
+            
+            time.sleep(check_interval)
+        
+        ready_count = sum(1 for port in batch_ports if self.health_monitor.is_instance_ready(port))
+        logger.warning(f"Batch readiness timeout: {ready_count}/{len(batch_ports)} instances ready after {max_wait_time}s")
+        return ready_count > 0
 
     def stop_services(self):
         with self._subnet_lock:

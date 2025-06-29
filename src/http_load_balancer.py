@@ -22,7 +22,7 @@ class HTTPLoadBalancer:
             },
             "proxies": [],
             "load_balancing_algorithm": "round_robin",
-            "health_check_interval": 30,
+            "health_check_interval": 15,
             "connection_timeout": 60,
             "max_retries": 3
         }

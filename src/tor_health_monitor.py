@@ -17,7 +17,7 @@ class TorInstanceHealth:
         self.max_restarts = 3
         self.last_check = None
         self.last_restart = None
-        self.check_timeout = 15
+        self.check_timeout = 10
         self.lock = threading.Lock()
     
     def check_health(self):
@@ -84,7 +84,7 @@ class TorInstanceHealth:
 
 
 class TorHealthMonitor:
-    def __init__(self, restart_callback, check_interval=30, get_available_subnets_callback=None):
+    def __init__(self, restart_callback, check_interval=15, get_available_subnets_callback=None):
         self.instance_health = {}
         self.health_check_running = True
         self.restart_callback = restart_callback
@@ -238,3 +238,19 @@ class TorHealthMonitor:
         with self._lock:
             self.instance_health.clear()
             self.subnet_restart_counts.clear()
+    
+    def is_instance_ready(self, port):
+        with self._lock:
+            if port not in self.instance_health:
+                return False
+            
+            health_monitor = self.instance_health[port]
+            
+            if health_monitor.last_check is None:
+                try:
+                    return health_monitor.check_health()
+                except Exception as e:
+                    logger.warning(f"Error checking readiness for port {port}: {e}")
+                    return False
+            
+            return health_monitor.failed_checks == 0
