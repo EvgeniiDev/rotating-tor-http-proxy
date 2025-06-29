@@ -2,6 +2,7 @@ import logging
 import subprocess
 import threading
 import concurrent.futures
+import socket
 from typing import List
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,28 @@ class TorProcessManager:
         logger.info(
             f"Restarting Tor instance on port {port} with {len(exit_nodes)} exit nodes")
 
+        logger.info(f"Validating {len(exit_nodes)} exit nodes before restart...")
+        validated_nodes = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_ip = {
+                executor.submit(self._validate_exit_node, ip): ip 
+                for ip in exit_nodes
+            }
+            
+            for future in concurrent.futures.as_completed(future_to_ip):
+                ip = future_to_ip[future]
+                try:
+                    if future.result():
+                        validated_nodes.append(ip)
+                except Exception as e:
+                    logger.debug(f"Validation failed for {ip}: {e}")
+        
+        if len(validated_nodes) < max(3, len(exit_nodes) // 2):
+            logger.error(f"Too few valid nodes for restart: {len(validated_nodes)}/{len(exit_nodes)}")
+            return False
+        
+        logger.info(f"Using {len(validated_nodes)}/{len(exit_nodes)} validated exit nodes")
+
         with self._lock:
             old_process = self.port_processes.get(port)
 
@@ -102,15 +125,15 @@ class TorProcessManager:
 
             self._stop_instance(port)
 
-            new_process, new_port = self._start_instance(exit_nodes)
+            new_process, new_port = self._start_instance(validated_nodes)
 
             if new_process and new_port:
                 logger.info(
-                    f"Successfully restarted Tor instance on port {new_port} with {len(exit_nodes)} exit nodes")
+                    f"Successfully restarted Tor instance on port {new_port} with {len(validated_nodes)} exit nodes")
                 return new_port
             else:
                 logger.error(
-                    f"Failed to restart Tor instance with {len(exit_nodes)} exit nodes")
+                    f"Failed to restart Tor instance with {len(validated_nodes)} exit nodes")
                 return False
 
     def count_running_instances(self):
@@ -151,10 +174,19 @@ class TorProcessManager:
         total_instances = len(exit_nodes_list)
         logger.info(f"Starting {total_instances} Tor instances in batches of {batch_size}")
         
-        for i in range(0, len(exit_nodes_list), batch_size):
-            batch = exit_nodes_list[i:i + batch_size]
+        logger.info("Validating exit nodes connectivity...")
+        validated_exit_nodes_list = self._validate_exit_nodes_batch(exit_nodes_list)
+        
+        if not validated_exit_nodes_list:
+            logger.error("No valid exit nodes found after validation")
+            return []
+        
+        logger.info(f"Validation complete: {len(validated_exit_nodes_list)}/{total_instances} batches have sufficient valid nodes")
+        
+        for i in range(0, len(validated_exit_nodes_list), batch_size):
+            batch = validated_exit_nodes_list[i:i + batch_size]
             batch_num = i // batch_size + 1
-            total_batches = (total_instances + batch_size - 1) // batch_size
+            total_batches = (len(validated_exit_nodes_list) + batch_size - 1) // batch_size
             
             logger.info(f"Processing batch {batch_num}/{total_batches} with {len(batch)} instances")
             
@@ -202,5 +234,54 @@ class TorProcessManager:
                 logger.info(f"Batch {batch_num}/{total_batches} completed: {successful_in_batch}/{len(batch)} instances started successfully")
         
         total_successful = sum(1 for r in results if r['success'])
-        logger.info(f"All batches completed: {total_successful}/{total_instances} instances started successfully")
+        logger.info(f"All batches completed: {total_successful}/{len(validated_exit_nodes_list)} instances started successfully")
         return results
+
+    def _verify_tor_exit_node(self, ip_address, timeout=10):
+        try:
+            import requests
+            url = f"https://check.torproject.org/torbulkexitlist?ip={ip_address}"
+            response = requests.get(url, timeout=timeout)
+            return response.status_code == 200 and ip_address in response.text
+        except Exception:
+            return True
+
+    def _validate_exit_node(self, ip_address, port=9001, timeout=5):
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            result = sock.connect_ex((ip_address, port))
+            sock.close()
+            
+            if result == 0:
+                return self._verify_tor_exit_node(ip_address)
+            return False
+        except Exception:
+            return False
+
+    def _validate_exit_nodes_batch(self, exit_nodes_list, max_workers=20):
+        validated_list = []
+        
+        for exit_nodes in exit_nodes_list:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_ip = {
+                    executor.submit(self._validate_exit_node, ip): ip 
+                    for ip in exit_nodes
+                }
+                
+                valid_nodes = []
+                for future in concurrent.futures.as_completed(future_to_ip):
+                    ip = future_to_ip[future]
+                    try:
+                        if future.result():
+                            valid_nodes.append(ip)
+                    except Exception as e:
+                        logger.debug(f"Validation failed for {ip}: {e}")
+                
+                if len(valid_nodes) >= max(3, len(exit_nodes) // 2):
+                    validated_list.append(valid_nodes)
+                    logger.info(f"Validated {len(valid_nodes)}/{len(exit_nodes)} exit nodes")
+                else:
+                    logger.warning(f"Too few valid nodes: {len(valid_nodes)}/{len(exit_nodes)}, skipping batch")
+        
+        return validated_list

@@ -75,39 +75,27 @@ class TorRelayManager:
             logger.warning("No exit nodes available for distribution")
             return {}
         
-        total_nodes = len(self.exit_nodes_by_probability)
-        nodes_per_process = min(50, max(10, total_nodes // num_processes))
+        sorted_nodes = sorted(self.exit_nodes_by_probability, key=lambda x: x['exit_probability'], reverse=True)
         
         process_distributions = {}
-        
-        high_prob_nodes = [node for node in self.exit_nodes_by_probability if node['exit_probability'] > 0.5]
-        medium_prob_nodes = [node for node in self.exit_nodes_by_probability if 0.1 < node['exit_probability'] <= 0.5]
-        low_prob_nodes = [node for node in self.exit_nodes_by_probability if 0 < node['exit_probability'] <= 0.1]
-        
-        logger.info(f"Node distribution: {len(high_prob_nodes)} high, {len(medium_prob_nodes)} medium, {len(low_prob_nodes)} low probability")
-        
-        all_nodes = high_prob_nodes + medium_prob_nodes + low_prob_nodes
-        random.shuffle(all_nodes)
-        
         for process_id in range(num_processes):
-            start_idx = process_id * nodes_per_process
-            end_idx = min(start_idx + nodes_per_process, len(all_nodes))
+            process_distributions[process_id] = {
+                'exit_nodes': [],
+                'total_probability': 0.0,
+                'node_count': 0
+            }
+        
+        for i, node in enumerate(sorted_nodes):
+            process_id = i % num_processes
             
-            if start_idx < len(all_nodes):
-                process_nodes = all_nodes[start_idx:end_idx]
-                
-                high_count = sum(1 for node in process_nodes if node['exit_probability'] > 0.5)
-                total_prob = sum(node['exit_probability'] for node in process_nodes)
-                
-                process_distributions[process_id] = {
-                    'exit_nodes': [node['ip'] for node in process_nodes],
-                    'high_probability_count': high_count,
-                    'total_probability': total_prob,
-                    'node_count': len(process_nodes)
-                }
-                
-                logger.info(f"Process {process_id}: {len(process_nodes)} nodes, "
-                          f"{high_count} high-prob, total prob: {total_prob:.2f}")
+            process_distributions[process_id]['exit_nodes'].append(node['ip'])
+            process_distributions[process_id]['node_count'] += 1
+            process_distributions[process_id]['total_probability'] += node['exit_probability']
+        
+        for process_id, data in process_distributions.items():
+            avg_prob = data['total_probability'] / data['node_count'] if data['node_count'] > 0 else 0
+            logger.info(f"Process {process_id}: {data['node_count']} nodes, "
+                      f"avg prob: {avg_prob:.3f}, total prob: {data['total_probability']:.2f}")
         
         self.distributed_nodes = process_distributions
         return process_distributions
@@ -125,7 +113,6 @@ class TorRelayManager:
         for process_id, data in self.distributed_nodes.items():
             stats[process_id] = {
                 'node_count': data['node_count'],
-                'high_probability_count': data['high_probability_count'],
                 'total_probability': data['total_probability'],
                 'avg_probability': data['total_probability'] / data['node_count'] if data['node_count'] > 0 else 0
             }
