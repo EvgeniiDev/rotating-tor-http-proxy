@@ -142,18 +142,18 @@ class TorProcessManager:
         logger.info(
             f"Restarting Tor instance on port {port} with {len(exit_nodes)} exit nodes")
 
-        logger.info(f"Validating {len(exit_nodes)} exit nodes before restart...")
-        if not self._load_tor_exit_nodes():
-            logger.error("Failed to load Tor exit nodes list")
-            return False
-            
-        validated_nodes = [ip for ip in exit_nodes if self._is_tor_exit_node(ip)]
+        logger.info(f"Prioritizing {len(exit_nodes)} exit nodes before restart...")
+        min_required = max(3, len(exit_nodes) // 2)
+        validated_nodes = self._validate_and_prioritize_exit_nodes(exit_nodes, min_required)
         
-        if len(validated_nodes) < max(3, len(exit_nodes) // 2):
-            logger.error(f"Too few valid nodes for restart: {len(validated_nodes)}/{len(exit_nodes)}")
+        official_count = len([ip for ip in validated_nodes if self._is_tor_exit_node(ip)])
+        unofficial_count = len(validated_nodes) - official_count
+        
+        if len(validated_nodes) < min_required:
+            logger.error(f"Too few nodes available for restart: {len(validated_nodes)}/{min_required} required")
             return False
         
-        logger.info(f"Using {len(validated_nodes)}/{len(exit_nodes)} validated exit nodes")
+        logger.info(f"Using {official_count} official + {unofficial_count} unofficial = {len(validated_nodes)} total nodes")
 
         with self._lock:
             old_process = self.port_processes.get(port)
@@ -203,30 +203,19 @@ class TorProcessManager:
         total_instances = len(exit_nodes_list)
         logger.info(f"Starting {total_instances} Tor instances sequentially in batches of {batch_size}")
         
-        logger.info("Validating exit nodes connectivity...")
-        if not self._load_tor_exit_nodes():
-            logger.error("Failed to load Tor exit nodes list")
-            return []
-            
-        validated_exit_nodes_list = []
-        for exit_nodes in exit_nodes_list:
-            valid_nodes = [ip for ip in exit_nodes if self._is_tor_exit_node(ip)]
-            if len(valid_nodes) >= max(3, len(exit_nodes) // 2):
-                validated_exit_nodes_list.append(valid_nodes)
-                logger.info(f"Validated {len(valid_nodes)}/{len(exit_nodes)} exit nodes")
-            else:
-                logger.warning(f"Too few valid nodes: {len(valid_nodes)}/{len(exit_nodes)}, skipping batch")
+        logger.info("Distributing exit nodes evenly across all processes...")
+        distributed_exit_nodes_list = self._distribute_nodes_evenly(exit_nodes_list)
         
-        if not validated_exit_nodes_list:
-            logger.error("No valid exit nodes found after validation")
+        if not distributed_exit_nodes_list:
+            logger.error("No sufficient exit nodes found after distribution")
             return []
         
-        logger.info(f"Validation complete: {len(validated_exit_nodes_list)}/{total_instances} batches have sufficient valid nodes")
+        logger.info(f"Distribution complete: {len(distributed_exit_nodes_list)}/{total_instances} processes will be started")
         
-        for i in range(0, len(validated_exit_nodes_list), batch_size):
-            batch = validated_exit_nodes_list[i:i + batch_size]
+        for i in range(0, len(distributed_exit_nodes_list), batch_size):
+            batch = distributed_exit_nodes_list[i:i + batch_size]
             batch_num = i // batch_size + 1
-            total_batches = (len(validated_exit_nodes_list) + batch_size - 1) // batch_size
+            total_batches = (len(distributed_exit_nodes_list) + batch_size - 1) // batch_size
             
             logger.info(f"Processing batch {batch_num}/{total_batches} with {len(batch)} instances")
             
@@ -275,5 +264,73 @@ class TorProcessManager:
                 time.sleep(2)
         
         total_successful = sum(1 for r in results if r['success'])
-        logger.info(f"All batches completed: {total_successful}/{len(validated_exit_nodes_list)} instances started successfully")
+        logger.info(f"All batches completed: {total_successful}/{len(distributed_exit_nodes_list)} instances started successfully")
         return results
+
+    def _validate_and_prioritize_exit_nodes(self, exit_nodes: List[str], min_required: int = 3):
+        if not self._load_tor_exit_nodes():
+            logger.warning("Failed to load official Tor exit nodes list, using all provided nodes")
+            return exit_nodes
+        
+        official_nodes = [ip for ip in exit_nodes if self._is_tor_exit_node(ip)]
+        unofficial_nodes = [ip for ip in exit_nodes if not self._is_tor_exit_node(ip)]
+        
+        prioritized_nodes = official_nodes.copy()
+        prioritized_nodes.extend(unofficial_nodes)
+        
+        if len(official_nodes) == 0:
+            logger.warning(f"No official nodes found, using {len(unofficial_nodes)} unofficial nodes")
+        elif len(unofficial_nodes) == 0:
+            logger.info(f"Using {len(official_nodes)} official nodes only")
+        else:
+            logger.info(f"Using {len(official_nodes)} official + {len(unofficial_nodes)} unofficial nodes")
+        
+        return prioritized_nodes
+
+    def _distribute_nodes_evenly(self, exit_nodes_list: List[List[str]]):
+        if not exit_nodes_list:
+            return []
+        
+        if not self._load_tor_exit_nodes():
+            logger.warning("Failed to load official Tor exit nodes list")
+        
+        all_nodes = set()
+        for nodes in exit_nodes_list:
+            all_nodes.update(nodes)
+        
+        all_nodes = list(all_nodes)
+        official_nodes = [ip for ip in all_nodes if self._is_tor_exit_node(ip)]
+        unofficial_nodes = [ip for ip in all_nodes if not self._is_tor_exit_node(ip)]
+        
+        num_processes = len(exit_nodes_list)
+        total_nodes = len(all_nodes)
+        base_nodes_per_process = total_nodes // num_processes
+        extra_nodes = total_nodes % num_processes
+        min_nodes_per_process = max(3, base_nodes_per_process)
+        
+        logger.info(f"Distributing {len(official_nodes)} official + {len(unofficial_nodes)} unofficial nodes among {num_processes} processes")
+        logger.info(f"Target: {base_nodes_per_process}-{base_nodes_per_process + 1} nodes per process (min {min_nodes_per_process})")
+        
+        if base_nodes_per_process < min_nodes_per_process:
+            logger.warning(f"Not enough nodes for even distribution: {total_nodes} total / {num_processes} processes = {base_nodes_per_process} < {min_nodes_per_process} minimum")
+        
+        distributed_lists = []
+        all_available_nodes = official_nodes + unofficial_nodes
+        
+        for i in range(num_processes):
+            nodes_for_this_process = base_nodes_per_process + (1 if i < extra_nodes else 0)
+            
+            start_idx = i * base_nodes_per_process + min(i, extra_nodes)
+            end_idx = start_idx + nodes_for_this_process
+            
+            process_nodes = all_available_nodes[start_idx:end_idx]
+            
+            if len(process_nodes) >= min_nodes_per_process:
+                distributed_lists.append(process_nodes)
+                official_count = len([ip for ip in process_nodes if self._is_tor_exit_node(ip)])
+                unofficial_count = len(process_nodes) - official_count
+                logger.info(f"Process {i+1}: {official_count} official + {unofficial_count} unofficial = {len(process_nodes)} total nodes")
+            else:
+                logger.warning(f"Process {i+1}: insufficient nodes ({len(process_nodes)}/{min_nodes_per_process}), skipping")
+        
+        return distributed_lists
