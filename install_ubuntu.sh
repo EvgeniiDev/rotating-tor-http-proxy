@@ -7,8 +7,6 @@ SERVICE_NAME="tor-http-proxy"
 USER="$USER"
 TOR_PROCESSES=200
 
-echo "=== Installing Tor HTTP Proxy on Ubuntu 22.04 ==="
-
 if [[ $EUID -ne 0 ]]; then
    echo "This script must be run as root (use sudo)" 
    exit 1
@@ -48,9 +46,7 @@ Group=$USER
 WorkingDirectory=$PROJECT_DIR
 Environment=PYTHONPATH=$PROJECT_DIR
 Environment=TOR_PROCESSES=$TOR_PROCESSES
-ExecStart=$PROJECT_DIR/venv/bin/python $PROJECT_DIR/start_new.py
-Restart=always
-RestartSec=10
+ExecStart=$PROJECT_DIR/venv/bin/python $PROJECT_DIR/main.py
 MemoryAccounting=yes
 MemoryHigh=4.3G
 MemoryMax=4.5G
@@ -76,7 +72,6 @@ echo "  journalctl -u $SERVICE_NAME -f        # Logs"
 echo ""
 echo "After starting the service:"
 echo "  HTTP Proxy: http://localhost:8080"
-echo "  Admin Panel: http://localhost:5000"
 echo ""
 echo "Start now? (y/n)"
 read -r response

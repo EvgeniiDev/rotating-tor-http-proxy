@@ -9,12 +9,14 @@ import os
 import sys
 import logging
 import signal
-from flask import Flask
-from flask_socketio import SocketIO
 
-from admin_panel import AdminPanel
+
 from http_load_balancer import HTTPLoadBalancer
 from tor_network_manager import TorNetworkManager
+from config_manager import ConfigManager
+from tor_relay_manager import TorRelayManager
+from tor_process_manager import TorProcessManager
+from tor_health_monitor import TorHealthMonitor
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,7 +26,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Глобальные переменные для компонентов
-admin_panel = None
 http_balancer = None
 tor_manager = None
 
@@ -40,7 +41,7 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 def main():
-    global admin_panel, http_balancer, tor_manager
+    global http_balancer, tor_manager
     
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -48,28 +49,36 @@ def main():
     tor_processes = int(os.environ.get('TOR_PROCESSES', '50'))
     
     logger.info("Запуск Rotating Tor HTTP Proxy с внешним балансировщиком")
-    logger.info("Используется прямой импорт proxy-load-balancer как Python модуль")
-    logger.info("Все классы создаются централизованно в start_new.py")
     logger.info(f"Количество Tor процессов: {tor_processes}")
     
     try:
-        logger.info("Создание Flask app и SocketIO...")
-        # Указываем правильные пути для шаблонов
-        app = Flask(__name__, template_folder='templates')
-        socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
-        
-        # Создание всех компонентов в стартовом файле
         logger.info("Создание HTTPLoadBalancer...")
         http_balancer = HTTPLoadBalancer(listen_port=8080)
+        http_balancer.start()
+        
+        logger.info("Создание зависимостей...")
+        config_manager = ConfigManager()
+        relay_manager = TorRelayManager()
+        process_manager = TorProcessManager(config_manager, http_balancer)
         
         logger.info("Создание TorNetworkManager...")
-        tor_manager = TorNetworkManager(socketio, http_balancer)
+        tor_manager = TorNetworkManager(
+            None, 
+            http_balancer, 
+            config_manager, 
+            relay_manager, 
+            process_manager, 
+            None
+        )
         
-        # Создание AdminPanel со всеми зависимостями
-        logger.info("Создание AdminPanel со всеми зависимостями...")
-        admin_panel = AdminPanel(app, socketio, http_balancer, tor_manager)
+        logger.info("Создание TorHealthMonitor...")
+        health_monitor = TorHealthMonitor(
+            tor_manager._restart_tor_instance_by_port,
+            get_available_exit_nodes_callback=tor_manager._get_available_exit_nodes_for_health_monitor
+        )
         
-        http_balancer.start()
+        tor_manager.health_monitor = health_monitor
+    
         
         logger.info("Запуск мониторинга Tor...")
         tor_manager.start_monitoring()
@@ -77,16 +86,9 @@ def main():
         logger.info("Запуск Tor сервисов...")
         tor_manager.start_services(tor_processes)
         
-        logger.info("Запуск веб-интерфейса...")
-        logger.info("Веб-интерфейс доступен по адресу: http://localhost:5000")
         logger.info("HTTP прокси доступен по адресу: http://localhost:8080")
         logger.info("Конфигурация передается в балансировщик как словарь Python")
         
-        socketio.run(app, 
-                    host='0.0.0.0', 
-                    port=5000, 
-                    debug=False, 
-                    allow_unsafe_werkzeug=True)
                     
     except Exception as e:
         logger.error(f"Ошибка запуска: {e}")

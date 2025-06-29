@@ -7,7 +7,6 @@ from datetime import datetime
 from collections import defaultdict
 
 from config_manager import ConfigManager
-from models import ServiceStatus, get_current_timestamp
 from tor_health_monitor import TorHealthMonitor
 from tor_relay_manager import TorRelayManager
 from tor_process_manager import TorProcessManager
@@ -16,22 +15,18 @@ logger = logging.getLogger(__name__)
 
 
 class TorNetworkManager:
-    def __init__(self, socketio, load_balancer):
+    def __init__(self, socketio, load_balancer, config_manager, relay_manager, process_manager, health_monitor):
         self.active_processes = {}
         self.monitoring = True
         self.services_started = False
         self.load_balancer = load_balancer
-        self.config_manager = ConfigManager()
+        self.config_manager = config_manager
         self.socketio = socketio
         self._lock = threading.RLock()
 
-        self.relay_manager = TorRelayManager()
-        self.process_manager = TorProcessManager(
-            self.config_manager, load_balancer)
-        self.health_monitor = TorHealthMonitor(
-            self._restart_tor_instance_by_port,
-            get_available_exit_nodes_callback=self._get_available_exit_nodes_for_health_monitor
-        )
+        self.relay_manager = relay_manager
+        self.process_manager = process_manager
+        self.health_monitor = health_monitor
 
         self.stats = {
             'active_processes': 0,
@@ -42,14 +37,6 @@ class TorNetworkManager:
             'distributed_processes': 0
         }
 
-    def fetch_tor_relays(self):
-        return self.relay_manager.fetch_tor_relays()
-
-    def extract_relay_ips(self, relay_data):
-        return self.relay_manager.extract_relay_ips(relay_data)
-
-    def distribute_exit_nodes(self, num_processes):
-        return self.relay_manager.distribute_exit_nodes(num_processes)
 
     def start_services(self, auto_start_count=None):
         if self.services_started:
@@ -72,19 +59,19 @@ class TorNetworkManager:
         return True
 
     def _auto_start_tor_instances(self, count):
-        relay_data = self.fetch_tor_relays()
+        relay_data = self.relay_manager.fetch_tor_relays()
         if not relay_data:
             logger.error("No relay data available")
             return
 
-        exit_nodes = self.extract_relay_ips(relay_data)
+        exit_nodes = self.relay_manager.extract_relay_ips(relay_data)
         if not exit_nodes:
             logger.error("No exit nodes available")
             return
 
         logger.info(f"Found {len(exit_nodes)} exit nodes")
         
-        node_distributions = self.distribute_exit_nodes(count)
+        node_distributions = self.relay_manager.distribute_exit_nodes(count)
         if not node_distributions:
             logger.error("Failed to distribute exit nodes")
             return
@@ -224,19 +211,12 @@ class TorNetworkManager:
         if hasattr(self, 'process_manager'):
             running_count = self.process_manager.count_running_instances()
             self.stats['running_instances'] = running_count
-            self.stats['last_update'] = get_current_timestamp()
+            self.stats['last_update'] = datetime.now().isoformat()
 
     def get_stats(self):
         self.update_running_instances_count()
         return self.stats.copy()
 
-    def get_distribution_stats(self):
-        return self.relay_manager.get_distribution_stats()
-
-    def get_running_instances(self):
-        if hasattr(self, 'process_manager'):
-            return self.process_manager.get_all_ports()
-        return []
 
     def stop_instance_by_port(self, port):
         if hasattr(self, 'process_manager'):
