@@ -3,6 +3,8 @@ import os
 import sys
 import logging
 import signal
+import time
+import threading
 
 
 from http_load_balancer import HTTPLoadBalancer
@@ -22,9 +24,11 @@ logger = logging.getLogger(__name__)
 # Глобальные переменные для компонентов
 http_balancer = None
 tor_manager = None
+shutdown_event = threading.Event()
 
 def signal_handler(sig, frame):
     logger.info('Получен сигнал остановки. Завершение работы...')
+    shutdown_event.set()
     try:
         if http_balancer:
             http_balancer.stop()
@@ -83,6 +87,19 @@ def main():
         logger.info("HTTP прокси доступен по адресу: http://localhost:8080")
         logger.info("Конфигурация передается в балансировщик как словарь Python")
         
+        logger.info("Сервисы запущены. Нажмите Ctrl+C для остановки.")
+        
+        try:
+            while not shutdown_event.is_set():
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("Получен KeyboardInterrupt. Завершение работы...")
+        finally:
+            shutdown_event.set()
+            if http_balancer:
+                http_balancer.stop()
+            if tor_manager:
+                tor_manager.stop_services()
                     
     except Exception as e:
         logger.error(f"Ошибка запуска: {e}")
