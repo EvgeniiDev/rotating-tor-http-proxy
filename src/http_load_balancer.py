@@ -1,11 +1,9 @@
 import logging
 import threading
-import time
 import traceback
 import requests
 from typing import List, Dict, Any
-from proxy_load_balancer.proxy_balancer import ProxyBalancer
-from proxy_load_balancer.stats_reporter import StatsReporter
+from proxy_load_balancer import ProxyBalancer, StatsReporter
 
 logger = logging.getLogger(__name__)
 
@@ -85,8 +83,12 @@ class HTTPLoadBalancer:
                 logger.error(f"Error stopping monitor: {e}")
             self.proxy_monitor = None
             
-        self.proxy_balancer.stop()
-        self.proxy_balancer = None
+        if self.proxy_balancer:
+            try:
+                self.proxy_balancer.stop()
+            except Exception as e:
+                logger.error(f"Error stopping proxy balancer: {e}")
+            self.proxy_balancer = None
         logger.info("HTTP Load Balancer stopped successfully")
 
     def get_stats(self) -> Dict[str, Any]:
@@ -96,14 +98,6 @@ class HTTPLoadBalancer:
                 'listen_port': self.listen_port,
                 'proxy_ports': self.proxy_ports
             }
-
-    def get_proxy_session(self, port: int):
-        session = requests.Session()
-        session.proxies = {
-            'http': f'socks5://127.0.0.1:{port}',
-            'https': f'socks5://127.0.0.1:{port}'
-        }
-        return session
 
     def is_running(self) -> bool:
         return self.proxy_balancer is not None

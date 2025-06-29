@@ -166,17 +166,6 @@ class TorProcessManager:
             return len([p for p in self.port_processes.values() 
                        if p and p.poll() is None])
 
-    def get_failed_instances(self):
-        failed_ports = []
-
-        with self._lock:
-            for port, process in self.port_processes.items():
-                if not (process and process.poll() is None):
-                    exit_nodes_count = len(self.port_exit_nodes.get(port, []))
-                    failed_ports.append(f"tor-{port}-{exit_nodes_count}nodes")
-
-        return failed_ports
-
     def stop_all_instances(self):
         with self._lock:
             for port, process in list(self.port_processes.items()):
@@ -185,10 +174,6 @@ class TorProcessManager:
                 self._stop_instance(port)
 
         logger.info("All Tor processes stopped")
-
-    def get_all_ports(self):
-        with self._lock:
-            return list(self.port_processes.keys())
 
     def get_port_exit_nodes(self, port):
         with self._lock:

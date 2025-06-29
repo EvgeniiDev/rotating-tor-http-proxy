@@ -14,8 +14,6 @@ class TorInstanceHealth:
         self.exit_nodes = exit_nodes
         self.failed_checks = 0
         self.max_failures = 3
-        self.restart_count = 0
-        self.max_restarts = 3
         self.last_check = None
         self.last_restart = None
         self.check_timeout = 10
@@ -82,23 +80,10 @@ class TorInstanceHealth:
         with self.lock:
             return self.failed_checks >= self.max_failures
 
-    def should_change_exit_nodes(self):
-        with self.lock:
-            return self.restart_count >= self.max_restarts
-
     def mark_restart(self):
         with self.lock:
-            self.restart_count += 1
             self.last_restart = time.time()
             self.failed_checks = 0
-
-    def change_exit_nodes(self, new_exit_nodes: List[str]):
-        with self.lock:
-            old_count = len(self.exit_nodes)
-            self.exit_nodes = new_exit_nodes
-            self.restart_count = 0
-            self.failed_checks = 0
-            logger.info(f"Changed exit nodes for port {self.port}: {old_count} -> {len(new_exit_nodes)} nodes")
 
     def get_stats(self):
         with self.lock:
@@ -106,7 +91,6 @@ class TorInstanceHealth:
                 'port': self.port,
                 'exit_nodes_count': len(self.exit_nodes),
                 'failed_checks': self.failed_checks,
-                'restart_count': self.restart_count,
                 'last_check': self.last_check,
                 'last_restart': self.last_restart
             }
@@ -235,11 +219,3 @@ class TorHealthMonitor:
                     return False
 
             return health_monitor.failed_checks == 0
-
-    def quick_instance_check(self, port):
-        with self._lock:
-            if port not in self.instance_health:
-                return False
-
-            health_monitor = self.instance_health[port]
-            return health_monitor.quick_health_check()

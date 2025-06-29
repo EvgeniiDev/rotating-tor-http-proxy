@@ -16,12 +16,10 @@ logger = logging.getLogger(__name__)
 
 class TorNetworkManager:
     def __init__(self, socketio, load_balancer, config_manager, relay_manager, process_manager, health_monitor):
-        self.active_processes = {}
         self.monitoring = True
         self.services_started = False
         self.load_balancer = load_balancer
         self.config_manager = config_manager
-        self.socketio = socketio
         self._lock = threading.RLock()
 
         self.relay_manager = relay_manager
@@ -29,7 +27,6 @@ class TorNetworkManager:
         self.health_monitor = health_monitor
 
         self.stats = {
-            'active_processes': 0,
             'last_update': None,
             'tor_instances': 0,
             'running_instances': 0,

@@ -1,10 +1,4 @@
 #!/usr/bin/env python3
-"""
-Rotating Tor HTTP Proxy with External Load Balancer
-
-Запуск приложения с новым внешним балансировщиком нагрузки.
-"""
-
 import os
 import sys
 import logging
