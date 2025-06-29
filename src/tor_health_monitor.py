@@ -3,14 +3,15 @@ import logging
 import threading
 import requests
 import concurrent.futures
+from typing import List
 
 logger = logging.getLogger(__name__)
 
 
 class TorInstanceHealth:
-    def __init__(self, port, subnet):
+    def __init__(self, port, exit_nodes: List[str]):
         self.port = port
-        self.subnet = subnet
+        self.exit_nodes = exit_nodes
         self.failed_checks = 0
         self.max_failures = 3
         self.restart_count = 0
@@ -81,7 +82,7 @@ class TorInstanceHealth:
         with self.lock:
             return self.failed_checks >= self.max_failures
 
-    def should_change_subnet(self):
+    def should_change_exit_nodes(self):
         with self.lock:
             return self.restart_count >= self.max_restarts
 
@@ -91,20 +92,19 @@ class TorInstanceHealth:
             self.last_restart = time.time()
             self.failed_checks = 0
 
-    def change_subnet(self, new_subnet):
+    def change_exit_nodes(self, new_exit_nodes: List[str]):
         with self.lock:
-            old_subnet = self.subnet
-            self.subnet = new_subnet
+            old_count = len(self.exit_nodes)
+            self.exit_nodes = new_exit_nodes
             self.restart_count = 0
             self.failed_checks = 0
-            logger.info(
-                f"Changed subnet from {old_subnet} to {new_subnet} for port {self.port}")
+            logger.info(f"Changed exit nodes for port {self.port}: {old_count} -> {len(new_exit_nodes)} nodes")
 
     def get_stats(self):
         with self.lock:
             return {
                 'port': self.port,
-                'subnet': self.subnet,
+                'exit_nodes_count': len(self.exit_nodes),
                 'failed_checks': self.failed_checks,
                 'restart_count': self.restart_count,
                 'last_check': self.last_check,
@@ -113,20 +113,20 @@ class TorInstanceHealth:
 
 
 class TorHealthMonitor:
-    def __init__(self, restart_callback, check_interval=15, get_available_subnets_callback=None):
+    def __init__(self, restart_callback, check_interval=15, get_available_exit_nodes_callback=None):
         self.instance_health = {}
         self.health_check_running = True
         self.restart_callback = restart_callback
-        self.get_available_subnets_callback = get_available_subnets_callback
-        self.subnet_restart_counts = {}
+        self.get_available_exit_nodes_callback = get_available_exit_nodes_callback
+        self.exit_nodes_restart_counts = {}
         self.check_interval = check_interval
         self._lock = threading.Lock()
 
-    def add_instance(self, port, subnet):
+    def add_instance(self, port, exit_nodes: List[str]):
         with self._lock:
-            health_monitor = TorInstanceHealth(port, subnet)
+            health_monitor = TorInstanceHealth(port, exit_nodes)
             self.instance_health[port] = health_monitor
-            logger.info(f"Added health monitoring for port {port}")
+            logger.info(f"Added health monitoring for port {port} with {len(exit_nodes)} exit nodes")
 
     def remove_instance(self, port):
         with self._lock:

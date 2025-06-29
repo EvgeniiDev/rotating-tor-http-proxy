@@ -1,15 +1,18 @@
 import logging
 import requests
+import random
 from collections import defaultdict
+from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class TorRelayManager:
     def __init__(self):
-        self.current_relays = {}
-        self.available_subnets = []
-    
+        self.current_relays = []
+        self.exit_nodes_by_probability = []
+        self.distributed_nodes = {}
+        
     def fetch_tor_relays(self):
         try:
             url = "https://onionoo.torproject.org/details?type=relay&running=true&fields=or_addresses,country,exit_probability"
@@ -20,68 +23,99 @@ class TorRelayManager:
             return None
     
     def extract_relay_ips(self, relay_data):
-        relays = []
         if not relay_data or 'relays' not in relay_data:
-            return relays
+            return []
 
-        subnet_relays = defaultdict(list)
-
+        exit_nodes = []
+        
         for relay in relay_data['relays']:
             if 'or_addresses' in relay:
                 for addr in relay['or_addresses']:
                     ip = addr.split(':')[0]
                     if ':' not in ip:
-                        ip_parts = ip.split('.')
-                        if len(ip_parts) >= 2:
-                            subnet = f"{ip_parts[0]}.{ip_parts[1]}"
-                            exit_prob = relay.get('exit_probability', 0)
-                            
-                            if isinstance(exit_prob, str):
-                                try:
-                                    exit_prob = float(exit_prob)
-                                except (ValueError, TypeError):
-                                    exit_prob = 0
+                        exit_prob = relay.get('exit_probability', 0)
+                        
+                        if isinstance(exit_prob, str):
+                            try:
+                                exit_prob = float(exit_prob)
+                            except (ValueError, TypeError):
+                                exit_prob = 0
 
-                            relay_info = {
+                        if exit_prob > 0:
+                            node_info = {
                                 'ip': ip,
                                 'country': relay.get('country', 'Unknown'),
                                 'exit_probability': exit_prob
                             }
-                            subnet_relays[subnet].append(relay_info)
+                            exit_nodes.append(node_info)
 
-        valid_subnets = set()
-        for subnet, subnet_relay_list in subnet_relays.items():
-            if any(relay['exit_probability'] > 0 for relay in subnet_relay_list):
-                valid_subnets.add(subnet)
-
-        for subnet in valid_subnets:
-            relays.extend(subnet_relays[subnet])
-
-        logger.info(f"Filtered to {len(valid_subnets)} subnets with exit probability > 0")
+        exit_nodes.sort(key=lambda x: x['exit_probability'], reverse=True)
         
-        self.available_subnets = sorted(list(valid_subnets))
-        self.current_relays = relays
+        logger.info(f"Found {len(exit_nodes)} exit nodes with probability > 0")
         
-        return relays
+        self.current_relays = exit_nodes
+        self.exit_nodes_by_probability = exit_nodes
+        
+        return exit_nodes
     
-    def get_available_subnets(self, count=None):
-        if count is None:
-            return self.available_subnets
-        return self.available_subnets[:count]
+    def distribute_exit_nodes(self, num_processes: int) -> Dict[int, List[str]]:
+        if not self.exit_nodes_by_probability:
+            logger.warning("No exit nodes available for distribution")
+            return {}
+        
+        total_nodes = len(self.exit_nodes_by_probability)
+        nodes_per_process = max(10, total_nodes // num_processes)
+        
+        process_distributions = {}
+        
+        high_prob_nodes = [node for node in self.exit_nodes_by_probability if node['exit_probability'] > 0.5]
+        medium_prob_nodes = [node for node in self.exit_nodes_by_probability if 0.1 < node['exit_probability'] <= 0.5]
+        low_prob_nodes = [node for node in self.exit_nodes_by_probability if 0 < node['exit_probability'] <= 0.1]
+        
+        logger.info(f"Node distribution: {len(high_prob_nodes)} high, {len(medium_prob_nodes)} medium, {len(low_prob_nodes)} low probability")
+        
+        all_nodes = high_prob_nodes + medium_prob_nodes + low_prob_nodes
+        random.shuffle(all_nodes)
+        
+        for process_id in range(num_processes):
+            start_idx = process_id * nodes_per_process
+            end_idx = min(start_idx + nodes_per_process, len(all_nodes))
+            
+            if start_idx < len(all_nodes):
+                process_nodes = all_nodes[start_idx:end_idx]
+                
+                high_count = sum(1 for node in process_nodes if node['exit_probability'] > 0.5)
+                total_prob = sum(node['exit_probability'] for node in process_nodes)
+                
+                process_distributions[process_id] = {
+                    'exit_nodes': [node['ip'] for node in process_nodes],
+                    'high_probability_count': high_count,
+                    'total_probability': total_prob,
+                    'node_count': len(process_nodes)
+                }
+                
+                logger.info(f"Process {process_id}: {len(process_nodes)} nodes, "
+                          f"{high_count} high-prob, total prob: {total_prob:.2f}")
+        
+        self.distributed_nodes = process_distributions
+        return process_distributions
     
-    def get_subnet_details(self):
-        subnet_counts = defaultdict(int)
-        subnet_details = defaultdict(list)
-
-        for relay in self.current_relays:
-            ip_parts = relay['ip'].split('.')
-            if len(ip_parts) >= 2:
-                subnet = f"{ip_parts[0]}.{ip_parts[1]}"
-                subnet_counts[subnet] += 1
-                subnet_details[subnet].append({
-                    'ip': relay['ip'],
-                    'country': relay['country'],
-                    'exit_probability': relay['exit_probability']
-                })
-
-        return subnet_counts, subnet_details
+    def get_exit_nodes_for_process(self, process_id: int) -> List[str]:
+        if process_id in self.distributed_nodes:
+            return self.distributed_nodes[process_id]['exit_nodes']
+        return []
+    
+    def get_distribution_stats(self):
+        if not self.distributed_nodes:
+            return {}
+        
+        stats = {}
+        for process_id, data in self.distributed_nodes.items():
+            stats[process_id] = {
+                'node_count': data['node_count'],
+                'high_probability_count': data['high_probability_count'],
+                'total_probability': data['total_probability'],
+                'avg_probability': data['total_probability'] / data['node_count'] if data['node_count'] > 0 else 0
+            }
+        
+        return stats
