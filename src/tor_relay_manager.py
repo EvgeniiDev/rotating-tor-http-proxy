@@ -11,7 +11,6 @@ class TorRelayManager:
     def __init__(self):
         self.current_relays = []
         self.exit_nodes_by_probability = []
-        self.distributed_nodes = {}
         
     def fetch_tor_relays(self):
         try:
@@ -97,24 +96,4 @@ class TorRelayManager:
             logger.info(f"Process {process_id}: {data['node_count']} nodes, "
                       f"avg prob: {avg_prob:.3f}, total prob: {data['total_probability']:.2f}")
         
-        self.distributed_nodes = process_distributions
         return process_distributions
-    
-    def get_exit_nodes_for_process(self, process_id: int) -> List[str]:
-        if process_id in self.distributed_nodes:
-            return self.distributed_nodes[process_id]['exit_nodes']
-        return []
-    
-    def get_distribution_stats(self):
-        if not self.distributed_nodes:
-            return {}
-        
-        stats = {}
-        for process_id, data in self.distributed_nodes.items():
-            stats[process_id] = {
-                'node_count': data['node_count'],
-                'total_probability': data['total_probability'],
-                'avg_probability': data['total_probability'] / data['node_count'] if data['node_count'] > 0 else 0
-            }
-        
-        return stats
