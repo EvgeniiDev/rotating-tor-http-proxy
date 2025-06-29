@@ -13,6 +13,7 @@ class TorProcessManager:
         self.port_processes = {}
         self.port_exit_nodes = {}
         self._lock = threading.RLock()
+        self._next_port = 10000
 
     def _start_instance(self, exit_nodes: List[str]):
         port = self._get_available_port()
@@ -40,7 +41,9 @@ class TorProcessManager:
                 logger.error(
                     f"Tor process failed to start on port {port}. Exit code: {process.returncode}")
                 if stderr:
-                    logger.error(f"Tor stderr: {stderr[:500]}")
+                    logger.error(f"Tor stderr: {stderr[:1000]}")
+                if stdout:
+                    logger.error(f"Tor stdout: {stdout[:1000]}")
                 return None, None
 
             with self._lock:
@@ -57,11 +60,10 @@ class TorProcessManager:
             return None, None
 
     def _get_available_port(self):
-        start_port = 10000
         with self._lock:
-            while start_port in self.port_processes:
-                start_port += 1
-            return start_port
+            port = self._next_port
+            self._next_port += 1
+            return port
 
     def _stop_instance(self, port):
         with self._lock:
