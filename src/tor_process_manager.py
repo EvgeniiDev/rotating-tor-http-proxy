@@ -70,12 +70,31 @@ class TorProcessManager:
             )
 
             import time
-            time.sleep(5)
+            startup_timeout = 15
+            check_interval = 1
+            elapsed = 0
+            
+            while elapsed < startup_timeout:
+                if process.poll() is not None:
+                    stdout, stderr = process.communicate()
+                    logger.error(
+                        f"Tor process failed to start on port {port}. Exit code: {process.returncode}")
+                    if stderr:
+                        logger.error(f"Tor stderr: {stderr[:1000]}")
+                    if stdout:
+                        logger.error(f"Tor stdout: {stdout[:1000]}")
+                    return None, None
+                
+                time.sleep(check_interval)
+                elapsed += check_interval
+                
+                if elapsed >= 8:
+                    break
 
             if process.poll() is not None:
                 stdout, stderr = process.communicate()
                 logger.error(
-                    f"Tor process failed to start on port {port}. Exit code: {process.returncode}")
+                    f"Tor process died during startup on port {port}. Exit code: {process.returncode}")
                 if stderr:
                     logger.error(f"Tor stderr: {stderr[:1000]}")
                 if stdout:
@@ -179,10 +198,10 @@ class TorProcessManager:
         with self._lock:
             return self.port_exit_nodes.get(port, [])
 
-    def start_tor_instances_batch(self, exit_nodes_list: List[List[str]], batch_size: int = 10):
+    def start_tor_instances_batch(self, exit_nodes_list: List[List[str]], batch_size: int = 3):
         results = []
         total_instances = len(exit_nodes_list)
-        logger.info(f"Starting {total_instances} Tor instances in batches of {batch_size}")
+        logger.info(f"Starting {total_instances} Tor instances sequentially in batches of {batch_size}")
         
         logger.info("Validating exit nodes connectivity...")
         if not self._load_tor_exit_nodes():
@@ -211,48 +230,49 @@ class TorProcessManager:
             
             logger.info(f"Processing batch {batch_num}/{total_batches} with {len(batch)} instances")
             
-            with concurrent.futures.ThreadPoolExecutor(max_workers=batch_size) as executor:
-                future_to_exit_nodes = {
-                    executor.submit(self._start_instance, exit_nodes): exit_nodes 
-                    for exit_nodes in batch
-                }
+            batch_results = []
+            for j, exit_nodes in enumerate(batch):
+                instance_num = j + 1
+                logger.info(f"Starting instance {instance_num}/{len(batch)} in batch {batch_num}")
                 
-                batch_results = []
-                completed = 0
-                for future in concurrent.futures.as_completed(future_to_exit_nodes):
-                    exit_nodes = future_to_exit_nodes[future]
-                    try:
-                        process, port = future.result()
-                        if port is not None:
-                            batch_results.append({
-                                'success': True,
-                                'port': port,
-                                'exit_nodes': exit_nodes,
-                                'process': process
-                            })
-                            logger.debug(f"Successfully started Tor instance on port {port}")
-                        else:
-                            batch_results.append({
-                                'success': False,
-                                'port': None,
-                                'exit_nodes': exit_nodes,
-                                'process': None
-                            })
-                            logger.warning(f"Failed to start Tor instance with {len(exit_nodes)} exit nodes")
-                    except Exception as e:
-                        logger.error(f"Exception in batch start for exit nodes {len(exit_nodes)}: {e}")
+                try:
+                    process, port = self._start_instance(exit_nodes)
+                    if port is not None:
+                        batch_results.append({
+                            'success': True,
+                            'port': port,
+                            'exit_nodes': exit_nodes,
+                            'process': process
+                        })
+                        logger.info(f"Successfully started Tor instance on port {port}")
+                    else:
                         batch_results.append({
                             'success': False,
                             'port': None,
                             'exit_nodes': exit_nodes,
                             'process': None
                         })
-                    
-                    completed += 1
+                        logger.warning(f"Failed to start Tor instance with {len(exit_nodes)} exit nodes")
+                except Exception as e:
+                    logger.error(f"Exception starting Tor instance with {len(exit_nodes)} exit nodes: {e}")
+                    batch_results.append({
+                        'success': False,
+                        'port': None,
+                        'exit_nodes': exit_nodes,
+                        'process': None
+                    })
                 
-                results.extend(batch_results)
-                successful_in_batch = sum(1 for r in batch_results if r['success'])
-                logger.info(f"Batch {batch_num}/{total_batches} completed: {successful_in_batch}/{len(batch)} instances started successfully")
+                import time
+                if j < len(batch) - 1:
+                    time.sleep(3)
+            
+            results.extend(batch_results)
+            successful_in_batch = sum(1 for r in batch_results if r['success'])
+            logger.info(f"Batch {batch_num}/{total_batches} completed: {successful_in_batch}/{len(batch)} instances started successfully")
+            
+            if batch_num < total_batches:
+                import time
+                time.sleep(2)
         
         total_successful = sum(1 for r in results if r['success'])
         logger.info(f"All batches completed: {total_successful}/{len(validated_exit_nodes_list)} instances started successfully")
