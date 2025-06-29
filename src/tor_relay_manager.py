@@ -32,7 +32,7 @@ class TorRelayManager:
             if 'or_addresses' in relay:
                 for addr in relay['or_addresses']:
                     ip = addr.split(':')[0]
-                    if ':' not in ip:
+                    if self._is_valid_ipv4(ip):
                         exit_prob = relay.get('exit_probability', 0)
                         
                         if isinstance(exit_prob, str):
@@ -51,12 +51,24 @@ class TorRelayManager:
 
         exit_nodes.sort(key=lambda x: x['exit_probability'], reverse=True)
         
-        logger.info(f"Found {len(exit_nodes)} exit nodes with probability > 0")
+        logger.info(f"Found {len(exit_nodes)} IPv4 exit nodes with probability > 0")
         
         self.current_relays = exit_nodes
         self.exit_nodes_by_probability = exit_nodes
         
         return exit_nodes
+    
+    def _is_valid_ipv4(self, ip):
+        try:
+            parts = ip.split('.')
+            if len(parts) != 4:
+                return False
+            for part in parts:
+                if not (0 <= int(part) <= 255):
+                    return False
+            return True
+        except (ValueError, AttributeError):
+            return False
     
     def distribute_exit_nodes(self, num_processes: int) -> Dict[int, List[str]]:
         if not self.exit_nodes_by_probability:
@@ -64,7 +76,7 @@ class TorRelayManager:
             return {}
         
         total_nodes = len(self.exit_nodes_by_probability)
-        nodes_per_process = max(10, total_nodes // num_processes)
+        nodes_per_process = min(50, max(10, total_nodes // num_processes))
         
         process_distributions = {}
         
