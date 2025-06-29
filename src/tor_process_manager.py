@@ -30,7 +30,7 @@ class TorProcessManager:
                 exit_nodes = set()
                 for line in response.text.strip().split('\n'):
                     ip = line.strip()
-                    if ip and not ip.startswith('#'):
+                    if ip:
                         exit_nodes.add(ip)
                 
                 self._tor_exit_nodes = exit_nodes
@@ -44,7 +44,7 @@ class TorProcessManager:
             logger.error(f"Error loading Tor exit nodes: {e}")
             return False
 
-    def _is_valid_exit_node(self, ip_address):
+    def _is_tor_exit_node(self, ip_address):
         if not self._exit_nodes_loaded:
             if not self._load_tor_exit_nodes():
                 return False
@@ -128,7 +128,7 @@ class TorProcessManager:
             logger.error("Failed to load Tor exit nodes list")
             return False
             
-        validated_nodes = [ip for ip in exit_nodes if self._is_valid_exit_node(ip)]
+        validated_nodes = [ip for ip in exit_nodes if self._is_tor_exit_node(ip)]
         
         if len(validated_nodes) < max(3, len(exit_nodes) // 2):
             logger.error(f"Too few valid nodes for restart: {len(validated_nodes)}/{len(exit_nodes)}")
@@ -206,7 +206,7 @@ class TorProcessManager:
             
         validated_exit_nodes_list = []
         for exit_nodes in exit_nodes_list:
-            valid_nodes = [ip for ip in exit_nodes if self._is_valid_exit_node(ip)]
+            valid_nodes = [ip for ip in exit_nodes if self._is_tor_exit_node(ip)]
             if len(valid_nodes) >= max(3, len(exit_nodes) // 2):
                 validated_exit_nodes_list.append(valid_nodes)
                 logger.info(f"Validated {len(valid_nodes)}/{len(exit_nodes)} exit nodes")
