@@ -1,6 +1,7 @@
 import time
 import logging
 import threading
+import requests
 from datetime import datetime
 from collections import defaultdict
 
@@ -128,6 +129,8 @@ class TorNetworkManager:
                 logger.error(f"Error starting Tor instance for process {process_id}: {e}")
                 failed_processes += 1
 
+            time.sleep(0.5)
+
             if (process_id + 1) % batch_size == 0:
                 logger.info(f"Batch completed: {process_id + 1}/{count} processes")
                 time.sleep(2)
@@ -140,8 +143,6 @@ class TorNetworkManager:
         self.stats['total_exit_nodes'] = len(exit_nodes)
 
     def _check_tor_instance_health_progressive(self, port, exit_nodes):
-        import requests
-        
         max_attempts = 3
         for attempt in range(max_attempts):
             try:
@@ -218,3 +219,13 @@ class TorNetworkManager:
         logger.info("Starting monitoring services...")
         self.monitoring = True
         return True
+
+    def get_service_status(self):
+        stats = self.get_stats()
+        return {
+            'status': 'running' if self.services_started else 'stopped',
+            'monitoring': self.monitoring,
+            'running_instances': stats.get('running_instances', 0),
+            'total_instances': stats.get('tor_instances', 0),
+            'services_started': self.services_started
+        }
