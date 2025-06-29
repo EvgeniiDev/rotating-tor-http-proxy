@@ -213,3 +213,8 @@ class TorNetworkManager:
             self.process_manager.stop_tor_instance(port)
             if hasattr(self, 'health_monitor'):
                 self.health_monitor.remove_instance(port)
+
+    def start_monitoring(self):
+        logger.info("Starting monitoring services...")
+        self.monitoring = True
+        return True

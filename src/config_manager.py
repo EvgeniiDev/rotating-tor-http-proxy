@@ -38,7 +38,11 @@ class ConfigManager:
         if not exit_nodes:
             raise ValueError("Exit nodes list is required for Tor configuration")
         
-        exit_nodes_str = ','.join(exit_nodes)
+        ipv4_nodes = [ip for ip in exit_nodes if self._is_valid_ipv4(ip)]
+        if not ipv4_nodes:
+            raise ValueError("No valid IPv4 exit nodes provided")
+        
+        exit_nodes_str = ','.join(ipv4_nodes)
         
         config_lines = [
             f"SocksPort 127.0.0.1:{socks_port}",
@@ -60,3 +64,15 @@ class ConfigManager:
         ]
         
         return '\n'.join(config_lines)
+    
+    def _is_valid_ipv4(self, ip):
+        try:
+            parts = ip.split('.')
+            if len(parts) != 4:
+                return False
+            for part in parts:
+                if not (0 <= int(part) <= 255):
+                    return False
+            return True
+        except (ValueError, AttributeError):
+            return False
