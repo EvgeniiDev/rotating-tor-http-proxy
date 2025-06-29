@@ -27,7 +27,6 @@ tor_manager = None
 shutdown_event = threading.Event()
 
 def signal_handler(sig, frame):
-    logger.info('Получен сигнал остановки. Завершение работы...')
     shutdown_event.set()
     try:
         if http_balancer:
@@ -35,7 +34,7 @@ def signal_handler(sig, frame):
         if tor_manager:
             tor_manager.stop_services()
     except Exception as e:
-        logger.error(f"Ошибка при остановке сервисов: {e}")
+        pass
     sys.exit(0)
 
 def main():
