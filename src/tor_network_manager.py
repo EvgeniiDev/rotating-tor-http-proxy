@@ -2,6 +2,7 @@ import time
 import logging
 import threading
 import requests
+import concurrent.futures
 from datetime import datetime
 from collections import defaultdict
 
@@ -90,52 +91,53 @@ class TorNetworkManager:
 
         logger.info(f"Distributed exit nodes across {len(node_distributions)} processes")
 
+        exit_nodes_list = []
+        for process_id in range(count):
+            if process_id in node_distributions:
+                process_exit_nodes = node_distributions[process_id]['exit_nodes']
+                if process_exit_nodes:
+                    exit_nodes_list.append(process_exit_nodes)
+
+        if not exit_nodes_list:
+            logger.error("No valid exit node distributions found")
+            return
+
         batch_size = 10
         total_started = 0
         failed_processes = 0
 
-        for process_id in range(count):
-            if process_id not in node_distributions:
-                logger.warning(f"No exit nodes for process {process_id}")
-                continue
+        logger.info(f"Starting {len(exit_nodes_list)} Tor instances in batches of {batch_size}")
+        batch_results = self.process_manager.start_tor_instances_batch(exit_nodes_list, batch_size)
 
-            process_exit_nodes = node_distributions[process_id]['exit_nodes']
-            if not process_exit_nodes:
-                logger.warning(f"Empty exit nodes list for process {process_id}")
-                continue
-
-            try:
-                port = self.process_manager.start_tor_instance(process_exit_nodes)
-                if port:
-                    self.health_monitor.add_instance(port, process_exit_nodes)
-                    
-                    logger.info(f"Started Tor instance on port {port}, testing...")
-                    health_result = self._check_tor_instance_health_progressive(
-                        port, process_exit_nodes)
-
-                    if health_result == 'ready':
-                        total_started += 1
-                        logger.info(f"Successfully started Tor instance on port {port}")
-                    else:
-                        logger.warning(f"Tor instance on port {port} failed health check")
-                        self.health_monitor.remove_instance(port)
-                        self.process_manager.stop_tor_instance(port)
-                        failed_processes += 1
-                else:
-                    logger.error(f"Failed to start Tor instance for process {process_id}")
-                    failed_processes += 1
-
-            except Exception as e:
-                logger.error(f"Error starting Tor instance for process {process_id}: {e}")
+        successful_instances = []
+        for result in batch_results:
+            if result['success']:
+                port = result['port']
+                process_exit_nodes = result['exit_nodes']
+                
+                self.health_monitor.add_instance(port, process_exit_nodes)
+                successful_instances.append((port, process_exit_nodes))
+            else:
+                logger.error(f"Failed to start Tor instance with {len(result['exit_nodes'])} exit nodes")
                 failed_processes += 1
 
-            time.sleep(0.5)
+        if successful_instances:
+            logger.info(f"Running health checks for {len(successful_instances)} instances in parallel...")
+            health_results = self._check_tor_instances_health_batch(successful_instances)
+            
+            for port, exit_nodes in successful_instances:
+                health_result = health_results.get(port, 'failed')
+                
+                if health_result == 'ready':
+                    total_started += 1
+                    logger.info(f"Successfully started Tor instance on port {port}")
+                else:
+                    logger.warning(f"Tor instance on port {port} failed health check")
+                    self.health_monitor.remove_instance(port)
+                    self.process_manager.stop_tor_instance(port)
+                    failed_processes += 1
 
-            if (process_id + 1) % batch_size == 0:
-                logger.info(f"Batch completed: {process_id + 1}/{count} processes")
-                time.sleep(2)
-
-        logger.info(f"Auto-start completed: {total_started}/{count} instances started successfully")
+        logger.info(f"Auto-start completed: {total_started}/{len(exit_nodes_list)} instances started successfully")
         if failed_processes > 0:
             logger.warning(f"Failed to start {failed_processes} processes")
 
@@ -165,6 +167,33 @@ class TorNetworkManager:
                 time.sleep(5)
         
         return 'failed'
+
+    def _check_tor_instances_health_batch(self, port_exit_nodes_pairs):
+        results = {}
+        logger.info(f"Starting parallel health checks for {len(port_exit_nodes_pairs)} instances")
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_port = {
+                executor.submit(self._check_tor_instance_health_progressive, port, exit_nodes): port
+                for port, exit_nodes in port_exit_nodes_pairs
+            }
+            
+            completed = 0
+            for future in concurrent.futures.as_completed(future_to_port):
+                port = future_to_port[future]
+                try:
+                    health_result = future.result()
+                    results[port] = health_result
+                    completed += 1
+                    if completed % 5 == 0:
+                        logger.info(f"Health check progress: {completed}/{len(port_exit_nodes_pairs)} completed")
+                except Exception as e:
+                    logger.error(f"Exception during health check for port {port}: {e}")
+                    results[port] = 'failed'
+                    completed += 1
+        
+        logger.info(f"All health checks completed: {sum(1 for r in results.values() if r == 'ready')}/{len(port_exit_nodes_pairs)} passed")
+        return results
 
     def _get_available_exit_nodes_for_health_monitor(self):
         if hasattr(self.relay_manager, 'current_relays'):

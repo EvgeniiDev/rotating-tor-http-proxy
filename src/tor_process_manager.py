@@ -1,6 +1,7 @@
 import logging
 import subprocess
 import threading
+import concurrent.futures
 from typing import List
 
 logger = logging.getLogger(__name__)
@@ -75,13 +76,6 @@ class TorProcessManager:
                 logger.info(
                     f"Removed SOCKS5 proxy port {port} from HTTP load balancer")
 
-    def start_tor_instance(self, exit_nodes: List[str]):
-        process, port = self._start_instance(exit_nodes)
-        if port is None:
-            logger.error(f"Failed to start Tor instance with {len(exit_nodes)} exit nodes")
-            return None
-        return port
-
     def stop_tor_instance(self, port):
         with self._lock:
             if port in self.port_processes:
@@ -119,10 +113,6 @@ class TorProcessManager:
                     f"Failed to restart Tor instance with {len(exit_nodes)} exit nodes")
                 return False
 
-    def _count_processes(self, ports):
-        return sum(1 for port in ports if port in self.port_processes and
-                   self.port_processes[port] and self.port_processes[port].poll() is None)
-
     def count_running_instances(self):
         with self._lock:
             return len([p for p in self.port_processes.values() 
@@ -155,3 +145,62 @@ class TorProcessManager:
     def get_port_exit_nodes(self, port):
         with self._lock:
             return self.port_exit_nodes.get(port, [])
+
+    def start_tor_instances_batch(self, exit_nodes_list: List[List[str]], batch_size: int = 10):
+        results = []
+        total_instances = len(exit_nodes_list)
+        logger.info(f"Starting {total_instances} Tor instances in batches of {batch_size}")
+        
+        for i in range(0, len(exit_nodes_list), batch_size):
+            batch = exit_nodes_list[i:i + batch_size]
+            batch_num = i // batch_size + 1
+            total_batches = (total_instances + batch_size - 1) // batch_size
+            
+            logger.info(f"Processing batch {batch_num}/{total_batches} with {len(batch)} instances")
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=batch_size) as executor:
+                future_to_exit_nodes = {
+                    executor.submit(self._start_instance, exit_nodes): exit_nodes 
+                    for exit_nodes in batch
+                }
+                
+                batch_results = []
+                completed = 0
+                for future in concurrent.futures.as_completed(future_to_exit_nodes):
+                    exit_nodes = future_to_exit_nodes[future]
+                    try:
+                        process, port = future.result()
+                        if port is not None:
+                            batch_results.append({
+                                'success': True,
+                                'port': port,
+                                'exit_nodes': exit_nodes,
+                                'process': process
+                            })
+                            logger.debug(f"Successfully started Tor instance on port {port}")
+                        else:
+                            batch_results.append({
+                                'success': False,
+                                'port': None,
+                                'exit_nodes': exit_nodes,
+                                'process': None
+                            })
+                            logger.warning(f"Failed to start Tor instance with {len(exit_nodes)} exit nodes")
+                    except Exception as e:
+                        logger.error(f"Exception in batch start for exit nodes {len(exit_nodes)}: {e}")
+                        batch_results.append({
+                            'success': False,
+                            'port': None,
+                            'exit_nodes': exit_nodes,
+                            'process': None
+                        })
+                    
+                    completed += 1
+                
+                results.extend(batch_results)
+                successful_in_batch = sum(1 for r in batch_results if r['success'])
+                logger.info(f"Batch {batch_num}/{total_batches} completed: {successful_in_batch}/{len(batch)} instances started successfully")
+        
+        total_successful = sum(1 for r in results if r['success'])
+        logger.info(f"All batches completed: {total_successful}/{total_instances} instances started successfully")
+        return results
