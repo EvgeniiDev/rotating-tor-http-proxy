@@ -219,7 +219,7 @@ class TorProcessManager:
         
         return distributed_lists
         
-    def start_tor_instances_batch(self, exit_nodes_list: List[List[str]], batch_size: int = 3) -> List[dict]:
+    def start_tor_instances_batch(self, exit_nodes_list: List[List[str]], batch_size: int = 20) -> List[dict]:
         total_instances = len(exit_nodes_list)
         logger.info(f"Starting {total_instances} Tor instances in parallel batches of {batch_size}")
         
@@ -246,7 +246,8 @@ class TorProcessManager:
             logger.info(f"Batch {batch_num}/{total_batches} completed: {successful_in_batch}/{len(batch)} instances started successfully")
             
             if batch_num < total_batches:
-                time.sleep(2)
+                logger.info(f"Waiting 20 seconds before starting next batch...")
+                time.sleep(20)
         
         total_successful = sum(1 for r in results if r['success'])
         logger.info(f"All batches completed: {total_successful}/{len(distributed_exit_nodes_list)} instances started successfully")
