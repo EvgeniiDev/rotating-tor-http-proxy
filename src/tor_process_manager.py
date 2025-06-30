@@ -40,6 +40,12 @@ class TorProcessManager:
             logger.error(f"Error loading Tor exit nodes: {e}")
         return False
 
+    def _get_node_counts(self, nodes: List[str]) -> Tuple[int, int]:
+        if not self._ensure_exit_nodes_loaded():
+            return 0, len(nodes)
+        official = len([ip for ip in nodes if ip in self._tor_exit_nodes])
+        return official, len(nodes) - official
+
     def _validate_and_prioritize_exit_nodes(self, exit_nodes: List[str], min_required: int = 3) -> List[str]:
         if not self._ensure_exit_nodes_loaded():
             logger.warning("Failed to load official Tor exit nodes list, using all provided nodes")
@@ -47,15 +53,15 @@ class TorProcessManager:
         
         official_nodes = [ip for ip in exit_nodes if ip in self._tor_exit_nodes]
         unofficial_nodes = [ip for ip in exit_nodes if ip not in self._tor_exit_nodes]
-        
         result = official_nodes + unofficial_nodes
         
+        official_count, unofficial_count = len(official_nodes), len(unofficial_nodes)
         if not official_nodes:
-            logger.warning(f"No official nodes found, using {len(unofficial_nodes)} unofficial nodes")
+            logger.warning(f"No official nodes found, using {unofficial_count} unofficial nodes")
         elif not unofficial_nodes:
-            logger.info(f"Using {len(official_nodes)} official nodes only")
+            logger.info(f"Using {official_count} official nodes only")
         else:
-            logger.info(f"Using {len(official_nodes)} official + {len(unofficial_nodes)} unofficial nodes")
+            logger.info(f"Using {official_count} official + {unofficial_count} unofficial nodes")
         
         return result
 
@@ -117,25 +123,21 @@ class TorProcessManager:
             logger.error(f"Exception starting Tor instance on port {port}: {e}")
             return None, None
 
-    def _cleanup_port(self, port: int) -> None:
-        with self._lock:
-            if port in self.port_processes:
-                self.load_balancer.remove_proxy(port)
-                del self.port_processes[port]
-                if port in self.port_exit_nodes:
-                    del self.port_exit_nodes[port]
-                logger.info(f"Removed SOCKS5 proxy port {port} from HTTP load balancer")
-
-    def stop_tor_instance(self, port: int) -> None:
+    def _stop_and_cleanup_port(self, port: int) -> None:
         with self._lock:
             if port in self.port_processes:
                 process = self.port_processes[port]
                 self._terminate_process(process)
-                self._cleanup_port(port)
+                self.load_balancer.remove_proxy(port)
+                del self.port_processes[port]
+                if port in self.port_exit_nodes:
+                    del self.port_exit_nodes[port]
+                logger.info(f"Stopped and removed SOCKS5 proxy port {port}")
+
+    def stop_tor_instance(self, port: int) -> None:
+        self._stop_and_cleanup_port(port)
 
     def restart_instance_by_port(self, port: int, exit_nodes: List[str]) -> int:
-        logger.info(f"Restarting Tor instance on port {port} with {len(exit_nodes)} exit nodes")
-        
         min_required = max(3, len(exit_nodes) // 2)
         validated_nodes = self._validate_and_prioritize_exit_nodes(exit_nodes, min_required)
         
@@ -143,15 +145,14 @@ class TorProcessManager:
             logger.error(f"Too few nodes available for restart: {len(validated_nodes)}/{min_required} required")
             return False
         
-        official_count = len([ip for ip in validated_nodes if ip in self._tor_exit_nodes])
-        unofficial_count = len(validated_nodes) - official_count
-        logger.info(f"Using {official_count} official + {unofficial_count} unofficial = {len(validated_nodes)} total nodes")
+        official_count, unofficial_count = self._get_node_counts(validated_nodes)
+        logger.info(f"Restarting Tor instance on port {port} with {official_count} official + {unofficial_count} unofficial = {len(validated_nodes)} total nodes")
         
         with self._lock:
             old_process = self.port_processes.get(port)
             if old_process:
                 self._terminate_process(old_process)
-            self._cleanup_port(port)
+            self._stop_and_cleanup_port(port)
             
             new_process, new_port = self._start_instance(validated_nodes)
             
@@ -168,9 +169,10 @@ class TorProcessManager:
 
     def stop_all_instances(self) -> None:
         with self._lock:
-            for port, process in list(self.port_processes.items()):
+            for port in list(self.port_processes.keys()):
+                process = self.port_processes[port]
                 self._terminate_process(process)
-                self._cleanup_port(port)
+                self._stop_and_cleanup_port(port)
         logger.info("All Tor processes stopped")
 
     def get_port_exit_nodes(self, port: int) -> List[str]:
@@ -182,40 +184,35 @@ class TorProcessManager:
             return []
         
         self._ensure_exit_nodes_loaded()
-        
         all_nodes = list(set().union(*exit_nodes_list))
         num_processes = len(exit_nodes_list)
-        total_nodes = len(all_nodes)
         
-        if total_nodes == 0:
+        if not all_nodes:
             logger.error("No exit nodes available for distribution")
             return []
         
-        min_nodes_per_process = 1
-        base_nodes_per_process = max(1, total_nodes // num_processes)
-        extra_nodes = total_nodes % num_processes
-        
         official_nodes = [ip for ip in all_nodes if ip in self._tor_exit_nodes]
         unofficial_nodes = [ip for ip in all_nodes if ip not in self._tor_exit_nodes]
-        
-        logger.info(f"Distributing {len(official_nodes)} official + {len(unofficial_nodes)} unofficial nodes among {num_processes} processes")
-        
-        distributed_lists = []
         all_available_nodes = official_nodes + unofficial_nodes
         
+        official_count, unofficial_count = len(official_nodes), len(unofficial_nodes)
+        logger.info(f"Distributing {official_count} official + {unofficial_count} unofficial nodes among {num_processes} processes")
+        
+        base_nodes_per_process = max(1, len(all_nodes) // num_processes)
+        extra_nodes = len(all_nodes) % num_processes
+        
+        distributed_lists = []
         for i in range(num_processes):
-            nodes_for_this_process = base_nodes_per_process + (1 if i < extra_nodes else 0)
+            nodes_count = base_nodes_per_process + (1 if i < extra_nodes else 0)
             start_idx = i * base_nodes_per_process + min(i, extra_nodes)
-            end_idx = start_idx + nodes_for_this_process
-            process_nodes = all_available_nodes[start_idx:end_idx]
+            process_nodes = all_available_nodes[start_idx:start_idx + nodes_count]
             
-            if len(process_nodes) >= min_nodes_per_process:
+            if process_nodes:
                 distributed_lists.append(process_nodes)
-                official_count = len([ip for ip in process_nodes if ip in self._tor_exit_nodes])
-                unofficial_count = len(process_nodes) - official_count
-                logger.info(f"Process {i+1}: {official_count} official + {unofficial_count} unofficial = {len(process_nodes)} total nodes")
+                p_official, p_unofficial = self._get_node_counts(process_nodes)
+                logger.info(f"Process {i+1}: {p_official} official + {p_unofficial} unofficial = {len(process_nodes)} total nodes")
             else:
-                logger.warning(f"Process {i+1}: insufficient nodes ({len(process_nodes)}/{min_nodes_per_process}), skipping")
+                logger.warning(f"Process {i+1}: no nodes available, skipping")
         
         return distributed_lists
         
@@ -224,7 +221,6 @@ class TorProcessManager:
         logger.info(f"Starting {total_instances} Tor instances in parallel batches of {batch_size}")
         
         distributed_exit_nodes_list = self._distribute_nodes_evenly(exit_nodes_list)
-        
         if not distributed_exit_nodes_list:
             logger.error("No sufficient exit nodes found after distribution")
             return []
@@ -232,21 +228,21 @@ class TorProcessManager:
         logger.info(f"Distribution complete: {len(distributed_exit_nodes_list)}/{total_instances} processes will be started")
         
         results = []
+        total_batches = (len(distributed_exit_nodes_list) + batch_size - 1) // batch_size
+        
         for i in range(0, len(distributed_exit_nodes_list), batch_size):
             batch = distributed_exit_nodes_list[i:i + batch_size]
             batch_num = i // batch_size + 1
-            total_batches = (len(distributed_exit_nodes_list) + batch_size - 1) // batch_size
             
-            logger.info(f"Processing batch {batch_num}/{total_batches} with {len(batch)} instances in parallel")
-            
+            logger.info(f"Processing batch {batch_num}/{total_batches} with {len(batch)} instances")
             batch_results = self._start_batch_parallel(batch)
             results.extend(batch_results)
             
-            successful_in_batch = sum(1 for r in batch_results if r['success'])
-            logger.info(f"Batch {batch_num}/{total_batches} completed: {successful_in_batch}/{len(batch)} instances started successfully")
+            successful_count = sum(1 for r in batch_results if r['success'])
+            logger.info(f"Batch {batch_num}/{total_batches} completed: {successful_count}/{len(batch)} instances started")
             
             if batch_num < total_batches:
-                logger.info(f"Waiting 20 seconds before starting next batch...")
+                logger.info("Waiting 20 seconds before starting next batch...")
                 time.sleep(20)
         
         total_successful = sum(1 for r in results if r['success'])
@@ -255,36 +251,31 @@ class TorProcessManager:
 
     def _start_batch_parallel(self, exit_nodes_batch: List[List[str]]) -> List[dict]:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(exit_nodes_batch)) as executor:
-            future_to_nodes = {
-                executor.submit(self._start_instance, exit_nodes): exit_nodes 
-                for exit_nodes in exit_nodes_batch
-            }
+            futures = {executor.submit(self._start_instance, nodes): nodes for nodes in exit_nodes_batch}
             
-            batch_results = []
-            for future in concurrent.futures.as_completed(future_to_nodes):
-                exit_nodes = future_to_nodes[future]
+            results = []
+            for future in concurrent.futures.as_completed(futures):
+                exit_nodes = futures[future]
                 try:
                     process, port = future.result()
                     success = port is not None
-                    batch_results.append({
+                    results.append({
                         'success': success,
                         'port': port,
                         'exit_nodes': exit_nodes,
                         'process': process
                     })
                     
-                    if success:
-                        logger.info(f"Successfully started Tor instance on port {port}")
-                    else:
-                        logger.warning(f"Failed to start Tor instance with {len(exit_nodes)} exit nodes")
+                    status = "Successfully started" if success else "Failed to start"
+                    logger.info(f"{status} Tor instance" + (f" on port {port}" if success else f" with {len(exit_nodes)} exit nodes"))
                         
                 except Exception as e:
                     logger.error(f"Exception starting Tor instance with {len(exit_nodes)} exit nodes: {e}")
-                    batch_results.append({
+                    results.append({
                         'success': False,
                         'port': None,
                         'exit_nodes': exit_nodes,
                         'process': None
                     })
             
-            return batch_results
+            return results
