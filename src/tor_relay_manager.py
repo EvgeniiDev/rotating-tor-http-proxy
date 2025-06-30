@@ -13,13 +13,9 @@ class TorRelayManager:
         self.exit_nodes_by_probability = []
         
     def fetch_tor_relays(self):
-        try:
-            url = "https://onionoo.torproject.org/details?type=relay&running=true&fields=or_addresses,country,exit_probability"
-            response = requests.get(url, timeout=30)
-            return response.json() if response.status_code == 200 else None
-        except Exception as e:
-            logger.error(f"Error fetching Tor relays: {e}")
-            return None
+        url = "https://onionoo.torproject.org/details?type=relay&running=true&fields=or_addresses,country,exit_probability"
+        response = requests.get(url, timeout=30)
+        return response.json()
     
     def extract_relay_ips(self, relay_data):
         if not relay_data or 'relays' not in relay_data:

@@ -23,8 +23,7 @@ class ConfigManager:
                 f.write(config_content)
 
             os.chmod(config_path, 0o644)
-            
-            logger.info(f"Created Tor config {config_path} for port {socks_port} with {len(exit_nodes)} exit nodes")
+
             return {
                 'config_path': config_path,
                 'socks_port': socks_port,
