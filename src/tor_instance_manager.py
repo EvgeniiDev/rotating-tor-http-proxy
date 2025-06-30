@@ -12,10 +12,11 @@ logger = logging.getLogger(__name__)
 
 
 class TorInstanceManager:
-    def __init__(self, port: int, exit_nodes: List[str], config_manager):
+    def __init__(self, port: int, exit_nodes: List[str], config_manager, exit_node_monitor=None):
         self.port = port
         self.exit_nodes = exit_nodes
         self.config_manager = config_manager
+        self.exit_node_monitor = exit_node_monitor
         
         self.process = None
         self.config_file = None
@@ -90,6 +91,10 @@ class TorInstanceManager:
                 self.current_exit_ip = data.get('origin', '').strip()
                 self.failed_checks = 0
                 self.last_check = datetime.now()
+                
+                if self.exit_node_monitor and self.current_exit_ip:
+                    self.exit_node_monitor.report_active_node(self.current_exit_ip)
+                    
                 return True
                 
         except Exception:
