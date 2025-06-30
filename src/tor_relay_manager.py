@@ -1,8 +1,7 @@
 import logging
 import requests
-import random
-from collections import defaultdict
 from typing import List, Dict, Any, Optional
+from utils import is_valid_ipv4
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +26,7 @@ class TorRelayManager:
             if 'or_addresses' in relay:
                 for addr in relay['or_addresses']:
                     ip = addr.split(':')[0]
-                    if self._is_valid_ipv4(ip):
+                    if is_valid_ipv4(ip):
                         exit_prob = relay.get('exit_probability', 0)
                         
                         if isinstance(exit_prob, str):
@@ -70,26 +69,34 @@ class TorRelayManager:
             logger.warning("No exit nodes available for distribution")
             return {}
         
-        sorted_nodes = sorted(self.exit_nodes_by_probability, key=lambda x: x['exit_probability'], reverse=True)
-        
+        nodes = self.exit_nodes_by_probability
+        total_nodes = len(nodes)
+        base_nodes_per_process = total_nodes // num_processes
+        extra_nodes = total_nodes % num_processes
         process_distributions = {}
-        for process_id in range(num_processes):
-            process_distributions[process_id] = {
-                'exit_nodes': [],
-                'total_probability': 0.0,
-                'node_count': 0
-            }
+        start_idx = 0
         
-        for i, node in enumerate(sorted_nodes):
-            process_id = i % num_processes
+        for process_id in range(num_processes):
+            nodes_count = base_nodes_per_process + (1 if process_id < extra_nodes else 0)
             
-            process_distributions[process_id]['exit_nodes'].append(node['ip'])
-            process_distributions[process_id]['node_count'] += 1
-            process_distributions[process_id]['total_probability'] += node['exit_probability']
+            if nodes_count > 0:
+                process_nodes = nodes[start_idx:start_idx + nodes_count]
+                process_distributions[process_id] = {
+                    'exit_nodes': [node['ip'] for node in process_nodes],
+                    'total_probability': sum(node['exit_probability'] for node in process_nodes),
+                    'node_count': nodes_count
+                }
+                start_idx += nodes_count
+            else:
+                process_distributions[process_id] = {
+                    'exit_nodes': [],
+                    'total_probability': 0.0,
+                    'node_count': 0
+                }
         
         for process_id, data in process_distributions.items():
-            avg_prob = data['total_probability'] / data['node_count'] if data['node_count'] > 0 else 0
-            logger.info(f"Process {process_id}: {data['node_count']} nodes, "
-                      f"avg prob: {avg_prob:.3f}, total prob: {data['total_probability']:.2f}")
+            if data['node_count'] > 0:
+                avg_prob = data['total_probability'] / data['node_count']
+                logger.info(f"Process {process_id}: {data['node_count']} nodes, avg prob: {avg_prob:.4f}")
         
         return process_distributions

@@ -1,6 +1,7 @@
 import logging
 import os
 from typing import Dict, List
+from utils import is_valid_ipv4
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class ConfigManager:
         if not exit_nodes:
             raise ValueError("Exit nodes list is required for Tor configuration")
         
-        ipv4_nodes = [ip for ip in exit_nodes if self._is_valid_ipv4(ip)]
+        ipv4_nodes = [ip for ip in exit_nodes if is_valid_ipv4(ip)]
         if not ipv4_nodes:
             raise ValueError("No valid IPv4 exit nodes provided")
         
