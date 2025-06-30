@@ -31,6 +31,7 @@ class HTTPLoadBalancer:
     def add_proxy(self, port: int):
         with self._lock:
             if port in self.proxy_ports:
+                logger.debug(f"Proxy on port {port} already exists")
                 return
 
             proxy_config = {"host": "127.0.0.1", "port": port}
@@ -38,19 +39,26 @@ class HTTPLoadBalancer:
             self.proxy_ports.append(port)
             self.config["proxies"].append(proxy_config)
             
-            self.proxy_balancer.update_proxies(self.config)
+            if self.proxy_balancer:
+                self.proxy_balancer.update_proxies(self.config)
+                logger.info(f"Added SOCKS5 proxy on port {port}")
+            else:
+                logger.warning(f"Proxy balancer not started, proxy on port {port} will be added when balancer starts")
 
     def remove_proxy(self, port: int):
         with self._lock:
             if port not in self.proxy_ports:
+                logger.debug(f"Proxy on port {port} not found")
                 return
 
             self.proxy_ports.remove(port)
             self.config["proxies"] = [p for p in self.config["proxies"] if p["port"] != port]
             
-            self.proxy_balancer.update_proxies(self.config)
-                
-            logger.info(f"Removed SOCKS5 proxy on port {port}")
+            if self.proxy_balancer:
+                self.proxy_balancer.update_proxies(self.config)
+                logger.info(f"Removed SOCKS5 proxy on port {port}")
+            else:
+                logger.warning(f"Proxy balancer not started, cannot remove proxy on port {port}")
 
 
     def start(self):
