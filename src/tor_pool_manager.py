@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 from tor_instance_manager import TorInstanceManager
+from exit_node_monitor import ExitNodeMonitor, NodeRedistributor
+
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,13 @@ class TorPoolManager:
         self._lock = threading.RLock()
         self._cleanup_thread = None
         self._shutdown_event = threading.Event()
+        
+        self.exit_node_monitor = ExitNodeMonitor()
+        self.node_redistributor = NodeRedistributor(
+            self.exit_node_monitor, 
+            self, 
+            self.relay_manager
+        )
         
         self.stats = {
             'total_instances': 0,
@@ -49,31 +58,33 @@ class TorPoolManager:
                 
             success_count = 0
             
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = []
-                
-                for process_id in range(instance_count):
-                    if process_id in node_distributions:
-                        process_exit_nodes = node_distributions[process_id]['exit_nodes']
-                        if process_exit_nodes:
-                            port = self._get_next_port()
-                            future = executor.submit(self._create_instance, port, process_exit_nodes)
-                            futures.append((port, future))
-                            
-                for port, future in futures:
-                    try:
-                        if future.result(timeout=60):
-                            success_count += 1
-                    except Exception:
-                        pass
+            logger.info(f"Starting creation of {instance_count} Tor instances...")
+            
+            for process_id in range(instance_count):
+                if process_id in node_distributions:
+                    process_exit_nodes = node_distributions[process_id]['exit_nodes']
+                    if process_exit_nodes:
+                        port = self._get_next_port()
+                        logger.info(f"Creating Tor instance {process_id + 1}/{instance_count} on port {port}...")
                         
+                        if self._create_instance(port, process_exit_nodes):
+                            success_count += 1
+                            logger.info(f"Successfully created Tor instance {process_id + 1}/{instance_count} on port {port}")
+                        else:
+                            logger.warning(f"Failed to create Tor instance {process_id + 1}/{instance_count} on port {port}")
+                            
+            logger.info(f"Created {success_count} out of {instance_count} requested Tor instances")
+            
             if success_count == 0:
                 return False
                 
             self.running = True
+            self.exit_node_monitor.start_monitoring()
             self._start_cleanup_thread()
             self._update_load_balancer()
             self._update_stats()
+            
+            logger.info(f"Pool started with {success_count} instances, updating load balancer...")
             return True
             
     def stop(self):
@@ -83,6 +94,8 @@ class TorPoolManager:
                 
             self.running = False
             self._shutdown_event.set()
+            
+            self.exit_node_monitor.stop_monitoring()
             
             if self._cleanup_thread and self._cleanup_thread.is_alive():
                 self._cleanup_thread.join(timeout=10)
@@ -103,18 +116,31 @@ class TorPoolManager:
             
     def get_stats(self) -> dict:
         with self._lock:
-            return self.stats.copy()
+            basic_stats = self.stats.copy()
+            monitor_stats = self.exit_node_monitor.get_stats()
+            basic_stats.update({
+                'exit_node_monitoring': monitor_stats
+            })
+            return basic_stats
             
+    def redistribute_nodes(self) -> bool:
+        return self.node_redistributor.redistribute_nodes()
+        
+    def refresh_backup_nodes(self) -> bool:
+        return self.node_redistributor.refresh_backup_nodes()
+        
     def get_instance_statuses(self) -> List[dict]:
         with self._lock:
             return [instance.get_status() for instance in self.instances.values()]
             
     def _create_instance(self, port: int, exit_nodes: List[str]) -> bool:
         try:
+            logger.debug(f"Creating Tor instance on port {port} with {len(exit_nodes)} exit nodes")
             instance = TorInstanceManager(
                 port=port,
                 exit_nodes=exit_nodes,
-                config_manager=self.config_manager
+                config_manager=self.config_manager,
+                exit_node_monitor=self.exit_node_monitor
             )
             
             if instance.start():
@@ -122,11 +148,14 @@ class TorPoolManager:
                     self.instances[port] = instance
                     
                 self._add_to_load_balancer(port)
+                logger.info(f"Tor instance on port {port} started and added to load balancer")
                 return True
             else:
+                logger.warning(f"Failed to start Tor instance on port {port}")
                 return False
                 
-        except Exception:
+        except Exception as e:
+            logger.error(f"Exception creating Tor instance on port {port}: {e}")
             return False
             
     def _remove_instance(self, port: int):
@@ -180,10 +209,18 @@ class TorPoolManager:
     def _cleanup_loop(self):
         logger.debug("Started cleanup thread")
         
+        redistribution_counter = 0
+        
         while not self._shutdown_event.is_set() and self.running:
             try:
                 self._check_dead_instances()
                 self._update_stats()
+                
+                redistribution_counter += 1
+                if redistribution_counter >= 5:
+                    self.redistribute_nodes()
+                    redistribution_counter = 0
+                    
                 self._shutdown_event.wait(60)
             except Exception as e:
                 logger.error(f"Error in cleanup loop: {e}")
