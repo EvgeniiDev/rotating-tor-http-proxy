@@ -12,7 +12,7 @@ from config_manager import ConfigManager
 from tor_relay_manager import TorRelayManager
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
