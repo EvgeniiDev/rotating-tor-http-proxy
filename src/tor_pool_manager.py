@@ -97,26 +97,43 @@ class TorPoolManager:
                     completed_count = 0
                     for future, process_id, port in futures:
                         try:
-                            result = future.result(timeout=45)
+                            result = future.result(timeout=120)
                             if result:
                                 completed_count += 1
                         except Exception as e:
                             logger.warning(f"Failed to create instance on port {port}: {e}")
                     
-                    logger.info(f"Batch {batch_num}: {completed_count}/{len(futures)} instances created successfully")
-                
-                with self._lock:
-                    success_count = len(self.instances)
-                
-                logger.info(f"Batch {batch_num}/{total_batches} completed, total instances: {success_count}")
+                    logger.info(f"Batch {batch_num}/{total_batches} started: {completed_count}/{len(futures)} instances")
+                    
+                    logger.info(f"Waiting for batch {batch_num} instances to become ready...")
+                    ready_count = 0
+                    max_wait_time = 300
+                    start_time = time.time()
+                    
+                    while ready_count < completed_count and (time.time() - start_time) < max_wait_time:
+                        ready_count = 0
+                        with self._lock:
+                            for port in range(10000 + batch_start, 10000 + batch_end):
+                                if port in self.instances:
+                                    instance = self.instances[port]
+                                    if instance.is_running and instance.is_healthy():
+                                        ready_count += 1
+                        
+                        if ready_count < completed_count:
+                            logger.info(f"Batch {batch_num}: {ready_count}/{completed_count} instances ready, waiting...")
+                            time.sleep(5)
+                    
+                    logger.info(f"Batch {batch_num}/{total_batches} completed: {ready_count}/{completed_count} instances ready and responding")
                 
                 if batch_num < total_batches:
                     logger.info(f"Waiting before next batch...")
-                    time.sleep(1)
+                    time.sleep(2)
                             
-            logger.info(f"Created {success_count} out of {instance_count} requested Tor instances")
+            with self._lock:
+                final_count = len(self.instances)
+            logger.info(f"Created {final_count} out of {instance_count} requested Tor instances")
             
-            if success_count == 0:
+            if final_count == 0:
                 return False
                 
             self.running = True
@@ -125,7 +142,7 @@ class TorPoolManager:
             self._update_load_balancer()
             self._update_stats()
             
-            logger.info(f"Pool started with {success_count} instances, updating load balancer...")
+            logger.info(f"Pool started with {final_count} instances, updating load balancer...")
             return True
             
     def stop(self):
