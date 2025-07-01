@@ -57,21 +57,38 @@ class TorPoolManager:
                 return False
                 
             success_count = 0
+            batch_size = 10
             
-            logger.info(f"Starting creation of {instance_count} Tor instances...")
+            logger.info(f"Starting creation of {instance_count} Tor instances in batches of {batch_size}...")
             
-            for process_id in range(instance_count):
-                if process_id in node_distributions:
-                    process_exit_nodes = node_distributions[process_id]['exit_nodes']
-                    if process_exit_nodes:
-                        port = self._get_next_port()
-                        logger.info(f"Creating Tor instance {process_id + 1}/{instance_count} on port {port}...")
-                        
-                        if self._create_instance(port, process_exit_nodes):
-                            success_count += 1
-                            logger.info(f"Successfully created Tor instance {process_id + 1}/{instance_count} on port {port}")
-                        else:
-                            logger.warning(f"Failed to create Tor instance {process_id + 1}/{instance_count} on port {port}")
+            for batch_start in range(0, instance_count, batch_size):
+                batch_end = min(batch_start + batch_size, instance_count)
+                batch_futures = []
+                
+                logger.info(f"Starting batch {batch_start // batch_size + 1}: instances {batch_start + 1}-{batch_end}")
+                
+                with ThreadPoolExecutor(max_workers=batch_size) as executor:
+                    for process_id in range(batch_start, batch_end):
+                        if process_id in node_distributions:
+                            process_exit_nodes = node_distributions[process_id]['exit_nodes']
+                            if process_exit_nodes:
+                                port = self._get_next_port()
+                                future = executor.submit(self._create_instance, port, process_exit_nodes)
+                                batch_futures.append((future, process_id, port))
+                    
+                    for future, process_id, port in batch_futures:
+                        try:
+                            if future.result(timeout=30):
+                                success_count += 1
+                                logger.info(f"Successfully created Tor instance {process_id + 1}/{instance_count} on port {port}")
+                            else:
+                                logger.warning(f"Failed to create Tor instance {process_id + 1}/{instance_count} on port {port}")
+                        except TimeoutError:
+                            logger.warning(f"Timeout creating Tor instance {process_id + 1}/{instance_count} on port {port}")
+                        except Exception as e:
+                            logger.error(f"Exception creating Tor instance {process_id + 1}/{instance_count} on port {port}: {e}")
+                
+                logger.info(f"Completed batch {batch_start // batch_size + 1}")
                             
             logger.info(f"Created {success_count} out of {instance_count} requested Tor instances")
             
