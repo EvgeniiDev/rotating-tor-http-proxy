@@ -39,7 +39,7 @@ class TorPoolManager:
             'last_update': None
         }
         
-    def start(self, instance_count: int) -> bool:
+    def start(self, instance_count: int, batch_size: int = 10) -> bool:
         with self._lock:
             if self.running:
                 return True
@@ -65,8 +65,6 @@ class TorPoolManager:
             logger.info(f"Created node distributions for {processes_with_nodes}/{instance_count} processes")
                 
             success_count = 0
-            batch_size = 10
-            
             logger.info(f"Starting creation of {instance_count} Tor instances in batches of {batch_size}...")
             logger.info(f"Total batches to process: {(instance_count + batch_size - 1) // batch_size}")
             
@@ -96,14 +94,11 @@ class TorPoolManager:
                     
                     logger.info(f"Submitted {len(futures)} tasks for batch {batch_num} (ports: {batch_ports})")
                     
-                    completed_count = 0
-                    for future, process_id, port in futures:
-                        try:
-                            result = future.result(timeout=120)
-                            if result:
-                                completed_count += 1
-                        except Exception as e:
-                            logger.warning(f"Failed to create instance on port {port}: {e}")
+                    logger.info(f"Waiting for batch {batch_num} instances to be created...")
+                    time.sleep(8)
+                    
+                    with self._lock:
+                        completed_count = sum(1 for port in batch_ports if port in self.instances)
                     
                     logger.info(f"Batch {batch_num}/{total_batches} started: {completed_count}/{len(futures)} instances")
                     
@@ -112,6 +107,7 @@ class TorPoolManager:
                     max_wait_time = 60
                     start_time = time.time()
                     check_count = 0
+                    failed_ports = set()
                     
                     while ready_count < completed_count and (time.time() - start_time) < max_wait_time:
                         ready_count = 0
@@ -119,20 +115,44 @@ class TorPoolManager:
                         
                         with self._lock:
                             for port in batch_ports:
+                                if port in failed_ports:
+                                    continue
+                                    
                                 if port in self.instances:
                                     instance = self.instances[port]
-                                    if instance.is_running:
+                                    if instance.is_running and instance.is_healthy():
                                         ready_count += 1
+                                    elif not instance.is_running or (instance.process and instance.process.poll() is not None):
+                                        failed_ports.add(port)
+                                        logger.warning(f"Instance on port {port} failed to start properly, marking for removal")
+                                else:
+                                    if (time.time() - start_time) > 30:
+                                        failed_ports.add(port)
+                                        logger.warning(f"Instance on port {port} was never created, marking as failed")
                         
                         elapsed = time.time() - start_time
-                        logger.info(f"Batch {batch_num} check #{check_count}: {ready_count}/{completed_count} running after {elapsed:.1f}s")
+                        active_instances = completed_count - len(failed_ports)
+                        logger.info(f"Batch {batch_num} check #{check_count}: {ready_count}/{active_instances} proxies responding after {elapsed:.1f}s")
                         
-                        if ready_count < completed_count:
+                        if ready_count < active_instances and elapsed < max_wait_time:
                             time.sleep(5)
                         else:
                             break
                     
-                    logger.info(f"Batch {batch_num}/{total_batches} readiness check completed: {ready_count}/{completed_count} instances running")
+                    for failed_port in failed_ports:
+                        with self._lock:
+                            if failed_port in self.instances:
+                                logger.warning(f"Stopping failed instance on port {failed_port}")
+                                instance = self.instances[failed_port]
+                                instance.stop()
+                                del self.instances[failed_port]
+                                self._remove_from_load_balancer(failed_port)
+                    
+                    final_ready = ready_count
+                    final_active = completed_count - len(failed_ports)
+                    if failed_ports:
+                        logger.warning(f"Batch {batch_num}/{total_batches}: {len(failed_ports)} instances failed and were stopped")
+                    logger.info(f"Batch {batch_num}/{total_batches} readiness check completed: {final_ready}/{final_active} proxies working")
                 
                 if batch_num < total_batches:
                     logger.info(f"Waiting before next batch...")
