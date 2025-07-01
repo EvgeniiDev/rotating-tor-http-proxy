@@ -80,11 +80,13 @@ class TorPoolManager:
                 # Используем ThreadPoolExecutor для параллельного запуска инстансов в батче
                 with ThreadPoolExecutor(max_workers=batch_size) as executor:
                     futures = []
+                    batch_ports = []
                     for process_id in range(batch_start, batch_end):
                         if process_id in node_distributions:
                             process_exit_nodes = node_distributions[process_id]['exit_nodes']
                             if process_exit_nodes:
                                 port = self._get_next_port()
+                                batch_ports.append(port)
                                 future = executor.submit(self._create_instance, port, process_exit_nodes)
                                 futures.append((future, process_id, port))
                             else:
@@ -92,7 +94,7 @@ class TorPoolManager:
                         else:
                             logger.warning(f"Process {process_id} not found in node distributions")
                     
-                    logger.info(f"Submitted {len(futures)} tasks for batch {batch_num}")
+                    logger.info(f"Submitted {len(futures)} tasks for batch {batch_num} (ports: {batch_ports})")
                     
                     completed_count = 0
                     for future, process_id, port in futures:
@@ -107,13 +109,13 @@ class TorPoolManager:
                     
                     logger.info(f"Waiting for batch {batch_num} instances to become ready...")
                     ready_count = 0
-                    max_wait_time = 300
+                    max_wait_time = 180
                     start_time = time.time()
                     
                     while ready_count < completed_count and (time.time() - start_time) < max_wait_time:
                         ready_count = 0
                         with self._lock:
-                            for port in range(10000 + batch_start, 10000 + batch_end):
+                            for port in batch_ports:
                                 if port in self.instances:
                                     instance = self.instances[port]
                                     if instance.is_running and instance.is_healthy():
@@ -121,7 +123,7 @@ class TorPoolManager:
                         
                         if ready_count < completed_count:
                             logger.info(f"Batch {batch_num}: {ready_count}/{completed_count} instances ready, waiting...")
-                            time.sleep(5)
+                            time.sleep(10)
                     
                     logger.info(f"Batch {batch_num}/{total_batches} completed: {ready_count}/{completed_count} instances ready and responding")
                 
