@@ -107,25 +107,32 @@ class TorPoolManager:
                     
                     logger.info(f"Batch {batch_num}/{total_batches} started: {completed_count}/{len(futures)} instances")
                     
-                    logger.info(f"Waiting for batch {batch_num} instances to become ready...")
+                    logger.info(f"Checking readiness of batch {batch_num} instances...")
                     ready_count = 0
-                    max_wait_time = 180
+                    max_wait_time = 60
                     start_time = time.time()
+                    check_count = 0
                     
                     while ready_count < completed_count and (time.time() - start_time) < max_wait_time:
                         ready_count = 0
+                        check_count += 1
+                        
                         with self._lock:
                             for port in batch_ports:
                                 if port in self.instances:
                                     instance = self.instances[port]
-                                    if instance.is_running and instance.is_healthy():
+                                    if instance.is_running:
                                         ready_count += 1
                         
+                        elapsed = time.time() - start_time
+                        logger.info(f"Batch {batch_num} check #{check_count}: {ready_count}/{completed_count} running after {elapsed:.1f}s")
+                        
                         if ready_count < completed_count:
-                            logger.info(f"Batch {batch_num}: {ready_count}/{completed_count} instances ready, waiting...")
-                            time.sleep(10)
+                            time.sleep(5)
+                        else:
+                            break
                     
-                    logger.info(f"Batch {batch_num}/{total_batches} completed: {ready_count}/{completed_count} instances ready and responding")
+                    logger.info(f"Batch {batch_num}/{total_batches} readiness check completed: {ready_count}/{completed_count} instances running")
                 
                 if batch_num < total_batches:
                     logger.info(f"Waiting before next batch...")
