@@ -4,6 +4,7 @@ import threading
 import time
 from typing import Dict, List
 from datetime import datetime
+from utils import safe_stop_thread
 
 from tor_instance_manager import TorInstanceManager
 from exit_node_monitor import ExitNodeMonitor, NodeRedistributor
@@ -93,8 +94,7 @@ class TorPoolManager:
             
             self.exit_node_monitor.stop_monitoring()
             
-            if self._cleanup_thread and self._cleanup_thread.is_alive():
-                self._cleanup_thread.join(timeout=10)
+            safe_stop_thread(self._cleanup_thread)
                 
             instances_to_stop = list(self.instances.values())
             
@@ -128,37 +128,7 @@ class TorPoolManager:
         with self._lock:
             return [instance.get_status() for instance in self.instances.values()]
             
-    def _create_instance_with_wait(self, port: int, exit_nodes: List[str]) -> bool:
-        try:
-            logger.info(f"Creating Tor instance on port {port} with {len(exit_nodes)} exit nodes")
-            instance = TorInstanceManager(
-                port=port,
-                exit_nodes=exit_nodes,
-                config_manager=self.config_manager,
-                exit_node_monitor=self.exit_node_monitor
-            )
-            
-            logger.info(f"Starting Tor instance on port {port}...")
-            if instance.start():
-                logger.info(f"Tor instance on port {port} started successfully")
-                
-                with self._lock:
-                    self.instances[port] = instance
-                
-                logger.info(f"Adding port {port} to load balancer...")
-                self._add_to_load_balancer(port)
-                return True
-            else:
-                logger.error(f"Failed to start Tor instance on port {port}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Exception creating Tor instance on port {port}: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return False
-            
-    def _create_instance(self, port: int, exit_nodes: List[str]) -> bool:
+    def _create_instance(self, port: int, exit_nodes: List[str], add_to_pool: bool = False) -> bool:
         try:
             logger.info(f"Creating Tor instance on port {port} with {len(exit_nodes)} exit nodes")
             instance = TorInstanceManager(
@@ -171,6 +141,14 @@ class TorPoolManager:
             logger.info(f"Starting Tor instance on port {port}...")
             if instance.start():
                 logger.info(f"Tor instance started successfully on port {port}")
+                
+                if add_to_pool:
+                    with self._lock:
+                        self.instances[port] = instance
+                    
+                    logger.info(f"Adding port {port} to load balancer...")
+                    self._add_to_load_balancer(port)
+                
                 return True
             else:
                 logger.error(f"Failed to start Tor instance on port {port}")
@@ -326,11 +304,10 @@ class TorPoolManager:
             return 0
         
         completed_count = 0
-        timeout_duration = min(600, max(120, instance_count * 3))
-        logger.info(f"Using timeout of {timeout_duration} seconds for {instance_count} instances")
+        logger.info(f"Starting creation of {len(tasks)} instances without global timeout")
         
         try:
-            results = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=timeout_duration)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
             
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
@@ -341,8 +318,8 @@ class TorPoolManager:
                 else:
                     logger.warning(f"Task {i} failed to start")
         
-        except asyncio.TimeoutError:
-            logger.error(f"Timeout while creating instances after {timeout_duration} seconds")
+        except Exception as e:
+            logger.error(f"Error while creating instances: {e}")
             
         logger.info(f"Async instance creation completed: {completed_count}/{len(tasks)} successful")
         
@@ -352,7 +329,7 @@ class TorPoolManager:
     async def _create_instance_async(self, semaphore: asyncio.Semaphore, port: int, exit_nodes: List[str], process_id: int) -> bool:
         async with semaphore:
             return await asyncio.get_event_loop().run_in_executor(
-                None, self._create_instance_with_wait, port, exit_nodes
+                None, self._create_instance, port, exit_nodes, True
             )
         
     async def _stop_instances_async(self, instances_to_stop: List[TorInstanceManager]):

@@ -7,8 +7,19 @@ import os
 import tempfile
 from typing import List, Optional
 from datetime import datetime
+from utils import safe_stop_thread
 
 logger = logging.getLogger(__name__)
+
+TEST_URLS = [
+    'https://httpbin.org/ip',
+    'https://api.ipify.org?format=json',
+    'https://icanhazip.com'
+]
+
+HTTP_OK = 200
+REQUEST_TIMEOUT = 15
+CONNECTION_TEST_TIMEOUT = 8
 
 
 class TorInstanceManager:
@@ -67,8 +78,7 @@ class TorInstanceManager:
             self._shutdown_event.set()
             self.is_running = False
             
-            if self._monitor_thread and self._monitor_thread.is_alive():
-                self._monitor_thread.join(timeout=5)
+            safe_stop_thread(self._monitor_thread, 5)
                 
             self._stop_tor_process()
             self._cleanup()
@@ -79,21 +89,15 @@ class TorInstanceManager:
         return self.start()
         
     def is_healthy(self) -> bool:
-        urls = [
-            'https://httpbin.org/ip',
-            'https://api.ipify.org?format=json',
-            'https://icanhazip.com'
-        ]
-        
-        for url in urls:
+        for url in TEST_URLS:
             try:
                 response = requests.get(
                     url,
                     proxies=self._get_proxies(),
-                    timeout=15
+                    timeout=REQUEST_TIMEOUT
                 )
                 
-                if response.status_code == 200:
+                if response.status_code == HTTP_OK:
                     if 'json' in response.headers.get('content-type', ''):
                         data = response.json()
                         if 'origin' in data:
@@ -193,7 +197,7 @@ class TorInstanceManager:
             finally:
                 self.process = None
                 
-    def _wait_for_startup(self, timeout: int = 90) -> bool:
+    def _wait_for_startup(self, timeout: int = 60) -> bool:
         start_time = time.time()
         logger.info(f"Waiting for Tor instance on port {self.port} to start up...")
         
@@ -230,20 +234,14 @@ class TorInstanceManager:
         return False
         
     def _test_connection(self) -> bool:
-        test_urls = [
-            'https://httpbin.org/ip',
-            'https://api.ipify.org?format=json',
-            'https://icanhazip.com'
-        ]
-        
-        for url in test_urls:
+        for url in TEST_URLS:
             try:
                 response = requests.get(
                     url,
                     proxies=self._get_proxies(),
-                    timeout=8
+                    timeout=CONNECTION_TEST_TIMEOUT
                 )
-                if response.status_code == 200:
+                if response.status_code == HTTP_OK:
                     logger.debug(f"Port {self.port} connection test passed with {url}")
                     return True
             except Exception as e:

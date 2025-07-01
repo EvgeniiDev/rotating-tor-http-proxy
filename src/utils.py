@@ -1,3 +1,6 @@
+import threading
+import time
+
 def is_valid_ipv4(ip):
     try:
         parts = ip.split('.')
@@ -9,3 +12,13 @@ def is_valid_ipv4(ip):
         return True
     except (ValueError, AttributeError):
         return False
+
+def safe_stop_thread(thread, timeout=10):
+    if thread and thread.is_alive():
+        thread.join(timeout=timeout)
+
+def safe_thread_wait(shutdown_event, interval, running_condition=None):
+    while not shutdown_event.is_set():
+        if running_condition and not running_condition():
+            break
+        shutdown_event.wait(interval)
