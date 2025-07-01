@@ -4,6 +4,7 @@ import time
 from typing import Dict, List, Set
 from datetime import datetime, timedelta
 from collections import defaultdict
+from utils import safe_stop_thread
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +44,7 @@ class ExitNodeMonitor:
         self.running = False
         self._shutdown_event.set()
         
-        if self._monitor_thread and self._monitor_thread.is_alive():
-            self._monitor_thread.join(timeout=10)
+        safe_stop_thread(self._monitor_thread)
             
         logger.info("Exit node monitoring stopped")
         
