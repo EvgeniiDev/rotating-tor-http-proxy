@@ -39,9 +39,11 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    tor_processes = int(os.environ.get('TOR_PROCESSES', '50'))
+    tor_processes_env = os.environ.get('TOR_PROCESSES', '50')
+    tor_processes = int(tor_processes_env)
     
     logger.info("Запуск Rotating Tor HTTP Proxy с новой архитектурой")
+    logger.info(f"TOR_PROCESSES environment variable: {tor_processes_env}")
     logger.info(f"Количество Tor процессов: {tor_processes}")
     
     try:
