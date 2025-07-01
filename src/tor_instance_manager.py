@@ -193,12 +193,12 @@ class TorInstanceManager:
             finally:
                 self.process = None
                 
-    def _wait_for_startup(self, timeout: int = 60) -> bool:
+    def _wait_for_startup(self, timeout: int = 90) -> bool:
         start_time = time.time()
         logger.info(f"Waiting for Tor instance on port {self.port} to start up...")
         
         retry_count = 0
-        max_retries_per_phase = 3
+        max_retries_per_phase = 5
         
         while time.time() - start_time < timeout:
             if self.process and self.process.poll() is not None:
@@ -207,17 +207,17 @@ class TorInstanceManager:
             
             elapsed = time.time() - start_time
             
-            if elapsed < 20:
+            if elapsed < 30:
                 if retry_count < max_retries_per_phase:
                     if self._test_connection():
                         logger.info(f"Tor instance on port {self.port} is ready")
                         return True
                     retry_count += 1
                     logger.debug(f"Port {self.port} not ready yet, waiting... ({elapsed:.1f}s, try {retry_count})")
-                    time.sleep(3)
+                    time.sleep(2)
                 else:
                     logger.debug(f"Port {self.port} still not ready after {max_retries_per_phase} tries, waiting longer... ({elapsed:.1f}s)")
-                    time.sleep(5)
+                    time.sleep(3)
                     retry_count = 0
             else:
                 if self._test_connection():

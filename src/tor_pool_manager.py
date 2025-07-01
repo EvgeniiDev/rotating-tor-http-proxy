@@ -2,6 +2,7 @@ import asyncio
 import logging
 import threading
 import time
+import psutil
 from typing import Dict, List
 from datetime import datetime
 
@@ -40,10 +41,15 @@ class TorPoolManager:
             'last_update': None
         }
         
-    def start(self, instance_count: int, max_concurrent: int = 10) -> bool:
+    def start(self, instance_count: int, max_concurrent: int = 5) -> bool:
         with self._lock:
             if self.running:
                 return True
+                
+            if not self._check_system_resources(instance_count):
+                logger.error("System resource check failed")
+                return False
+                
             relay_data = self.relay_manager.fetch_tor_relays()
             if not relay_data:
                 logger.error("Failed to fetch Tor relay data")
@@ -326,8 +332,11 @@ class TorPoolManager:
             return 0
         
         completed_count = 0
+        timeout_duration = min(600, max(120, instance_count * 3))
+        logger.info(f"Using timeout of {timeout_duration} seconds for {instance_count} instances")
+        
         try:
-            results = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=30)
+            results = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=timeout_duration)
             
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
@@ -339,7 +348,7 @@ class TorPoolManager:
                     logger.warning(f"Task {i} failed to start")
         
         except asyncio.TimeoutError:
-            logger.error("Timeout while creating instances")
+            logger.error(f"Timeout while creating instances after {timeout_duration} seconds")
             
         logger.info(f"Async instance creation completed: {completed_count}/{len(tasks)} successful")
         
@@ -365,3 +374,25 @@ class TorPoolManager:
             await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=30)
         except asyncio.TimeoutError:
             logger.warning("Timeout while stopping instances")
+    
+    def _check_system_resources(self, instance_count: int) -> bool:
+        try:
+            memory = psutil.virtual_memory()
+            available_memory_gb = memory.available / (1024**3)
+            
+            estimated_memory_needed = instance_count * 0.05
+            
+            if available_memory_gb < estimated_memory_needed:
+                logger.warning(f"System may not have enough memory for {instance_count} Tor instances")
+                logger.warning(f"Available: {available_memory_gb:.1f}GB, Estimated needed: {estimated_memory_needed:.1f}GB")
+                return False
+            
+            max_concurrent = min(5, max(1, int(available_memory_gb / 2)))
+            logger.info(f"System resources check passed. Available memory: {available_memory_gb:.1f}GB")
+            logger.info(f"Recommended max concurrent instances: {max_concurrent}")
+            
+            return True
+            
+        except Exception as e:
+            logger.warning(f"Could not check system resources: {e}")
+            return True
