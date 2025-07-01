@@ -45,11 +45,6 @@ class TorPoolManager:
         with self._lock:
             if self.running:
                 return True
-                
-            if not self._check_system_resources(instance_count):
-                logger.error("System resource check failed")
-                return False
-                
             relay_data = self.relay_manager.fetch_tor_relays()
             if not relay_data:
                 logger.error("Failed to fetch Tor relay data")
@@ -374,25 +369,3 @@ class TorPoolManager:
             await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=30)
         except asyncio.TimeoutError:
             logger.warning("Timeout while stopping instances")
-    
-    def _check_system_resources(self, instance_count: int) -> bool:
-        try:
-            memory = psutil.virtual_memory()
-            available_memory_gb = memory.available / (1024**3)
-            
-            estimated_memory_needed = instance_count * 0.05
-            
-            if available_memory_gb < estimated_memory_needed:
-                logger.warning(f"System may not have enough memory for {instance_count} Tor instances")
-                logger.warning(f"Available: {available_memory_gb:.1f}GB, Estimated needed: {estimated_memory_needed:.1f}GB")
-                return False
-            
-            max_concurrent = min(5, max(1, int(available_memory_gb / 2)))
-            logger.info(f"System resources check passed. Available memory: {available_memory_gb:.1f}GB")
-            logger.info(f"Recommended max concurrent instances: {max_concurrent}")
-            
-            return True
-            
-        except Exception as e:
-            logger.warning(f"Could not check system resources: {e}")
-            return True
