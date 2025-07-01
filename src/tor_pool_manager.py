@@ -2,7 +2,6 @@ import asyncio
 import logging
 import threading
 import time
-import psutil
 from typing import Dict, List
 from datetime import datetime
 
