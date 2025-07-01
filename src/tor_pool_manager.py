@@ -63,32 +63,32 @@ class TorPoolManager:
             
             for batch_start in range(0, instance_count, batch_size):
                 batch_end = min(batch_start + batch_size, instance_count)
-                batch_futures = []
                 
                 logger.info(f"Starting batch {batch_start // batch_size + 1}: instances {batch_start + 1}-{batch_end}")
                 
+                # Используем ThreadPoolExecutor для параллельного запуска инстансов в батче
                 with ThreadPoolExecutor(max_workers=batch_size) as executor:
+                    futures = []
                     for process_id in range(batch_start, batch_end):
                         if process_id in node_distributions:
                             process_exit_nodes = node_distributions[process_id]['exit_nodes']
                             if process_exit_nodes:
                                 port = self._get_next_port()
                                 future = executor.submit(self._create_instance, port, process_exit_nodes)
-                                batch_futures.append((future, process_id, port))
+                                futures.append((future, process_id, port))
                     
-                    for future, process_id, port in batch_futures:
-                        try:
-                            if future.result(timeout=30):
-                                success_count += 1
-                                logger.info(f"Successfully created Tor instance {process_id + 1}/{instance_count} on port {port}")
-                            else:
-                                logger.warning(f"Failed to create Tor instance {process_id + 1}/{instance_count} on port {port}")
-                        except TimeoutError:
-                            logger.warning(f"Timeout creating Tor instance {process_id + 1}/{instance_count} on port {port}")
-                        except Exception as e:
-                            logger.error(f"Exception creating Tor instance {process_id + 1}/{instance_count} on port {port}: {e}")
+                    logger.info(f"Submitted {len(futures)} tasks for batch {batch_start // batch_size + 1}")
+                    
+                    # Даем время на создание инстансов, не ждем future.result()
+                    time.sleep(2)
                 
-                logger.info(f"Completed batch {batch_start // batch_size + 1}")
+                # Обновляем счетчик по фактическому состоянию
+                with self._lock:
+                    success_count = len(self.instances)
+                
+                logger.info(f"Batch {batch_start // batch_size + 1} completed, total instances: {success_count}")
+                
+                logger.info(f"Completed batch {batch_start // batch_size + 1}: {success_count} total instances created so far")
                             
             logger.info(f"Created {success_count} out of {instance_count} requested Tor instances")
             
@@ -160,9 +160,12 @@ class TorPoolManager:
                 exit_node_monitor=self.exit_node_monitor
             )
             
+            logger.debug(f"Starting Tor instance on port {port}...")
             if instance.start():
+                logger.debug(f"Tor instance on port {port} started, adding to instances dict...")
                 with self._lock:
                     self.instances[port] = instance
+                    logger.debug(f"Added instance {port} to dict, total instances: {len(self.instances)}")
                     
                 self._add_to_load_balancer(port)
                 logger.info(f"Tor instance on port {port} started and added to load balancer")

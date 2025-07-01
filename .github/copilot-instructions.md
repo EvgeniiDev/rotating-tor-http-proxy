@@ -7,11 +7,7 @@
 5. Ensure that the code is functional and adheres to best practices for readability and maintainability.
 6. Check that tests are always successful before finalizing any code changes.
 7. Do not write instructions.
-8. Before finalizing changes, verify that code is in good condition by checking for:
-   - Duplicated code blocks or logic
-   - Unused methods, functions, variables, or imports
-   - Dead code that is never executed
-   - Redundant implementations
-9. Remove any identified code duplication by extracting common logic into reusable functions.
-10. Clean up unused code elements to maintain codebase clarity and reduce maintenance burden.
-11. Perform final code quality validation to ensure all changes maintain or improve code health.
+8. Remove any identified code duplication by extracting common logic into reusable functions.
+9. Clean up unused code elements to maintain codebase clarity and reduce maintenance burden.
+10. Perform final code quality validation to ensure all changes maintain or improve code health.
+11. Always limit time of execution linux terminal commands.
