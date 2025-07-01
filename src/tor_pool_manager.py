@@ -1,8 +1,8 @@
+import asyncio
 import logging
 import threading
 import time
 from typing import Dict, List
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 from tor_instance_manager import TorInstanceManager
@@ -44,130 +44,44 @@ class TorPoolManager:
         with self._lock:
             if self.running:
                 return True
-                
             relay_data = self.relay_manager.fetch_tor_relays()
             if not relay_data:
                 logger.error("Failed to fetch Tor relay data")
                 return False
-                
             exit_nodes = self.relay_manager.extract_relay_ips(relay_data)
             if not exit_nodes:
                 logger.error("No exit nodes extracted from relay data")
                 return False
-            
             logger.info(f"Found {len(exit_nodes)} exit nodes")
-                
             node_distributions = self.relay_manager.distribute_exit_nodes(instance_count)
             if not node_distributions:
                 logger.error("Failed to distribute exit nodes across instances")
                 return False
-            
             processes_with_nodes = sum(1 for d in node_distributions.values() if d.get('exit_nodes'))
             logger.info(f"Created node distributions for {processes_with_nodes}/{instance_count} processes")
-                
-            logger.info(f"Starting parallel creation of {instance_count} Tor instances with max {max_concurrent} concurrent threads...")
-            
-            with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
-                futures = []
-                all_ports = []
-                
-                for process_id in range(instance_count):
-                    if process_id in node_distributions:
-                        process_exit_nodes = node_distributions[process_id]['exit_nodes']
-                        if process_exit_nodes:
-                            port = self._get_next_port()
-                            all_ports.append(port)
-                            future = executor.submit(self._create_instance_with_wait, port, process_exit_nodes)
-                            futures.append((future, process_id, port))
-                        else:
-                            logger.warning(f"Process {process_id} has no exit nodes assigned")
-                    else:
-                        logger.warning(f"Process {process_id} not found in node distributions")
-                
-                logger.info(f"Submitted {len(futures)} tasks for parallel execution (ports: {all_ports})")
-                
-                completed_count = 0
-                for future, process_id, port in as_completed([(f, p, pt) for f, p, pt in futures], timeout=300):
-                    try:
-                        success = future.result()
-                        if success:
-                            completed_count += 1
-                            logger.info(f"Instance {port} completed successfully ({completed_count}/{len(futures)})")
-                        else:
-                            logger.warning(f"Instance {port} failed to start")
-                    except Exception as e:
-                        logger.error(f"Exception in instance {port} creation: {e}")
-                
-                logger.info(f"Parallel instance creation completed: {completed_count}/{len(futures)} successful")
-                
-                logger.info("Checking readiness of all instances...")
-                ready_count = 0
-                max_wait_time = 120
-                start_time = time.time()
-                check_count = 0
-                failed_ports = set()
-                
-                while ready_count < completed_count and (time.time() - start_time) < max_wait_time:
-                    ready_count = 0
-                    check_count += 1
-                    
-                    with self._lock:
-                        for port in all_ports:
-                            if port in failed_ports:
-                                continue
-                                
-                            if port in self.instances:
-                                instance = self.instances[port]
-                                if instance.is_running and instance.is_healthy():
-                                    ready_count += 1
-                                    self._add_to_load_balancer(port)
-                                elif not instance.is_running or (instance.process and instance.process.poll() is not None):
-                                    failed_ports.add(port)
-                                    logger.warning(f"Instance on port {port} failed, marking for removal")
-                            else:
-                                if (time.time() - start_time) > 60:
-                                    failed_ports.add(port)
-                                    logger.warning(f"Instance on port {port} was never created, marking as failed")
-                    
-                    elapsed = time.time() - start_time
-                    active_instances = completed_count - len(failed_ports)
-                    logger.info(f"Readiness check #{check_count}: {ready_count}/{active_instances} proxies responding after {elapsed:.1f}s")
-                    
-                    if ready_count < active_instances and elapsed < max_wait_time:
-                        time.sleep(5)
-                    else:
-                        break
-                
-                for failed_port in failed_ports:
-                    with self._lock:
-                        if failed_port in self.instances:
-                            logger.warning(f"Stopping failed instance on port {failed_port}")
-                            instance = self.instances[failed_port]
-                            instance.stop()
-                            del self.instances[failed_port]
-                            self._remove_from_load_balancer(failed_port)
-                
-                final_ready = ready_count
-                final_active = completed_count - len(failed_ports)
-                if failed_ports:
-                    logger.warning(f"{len(failed_ports)} instances failed and were stopped")
-                logger.info(f"Final readiness check completed: {final_ready}/{final_active} proxies working")
-                            
-            with self._lock:
-                final_count = len(self.instances)
-            logger.info(f"Created {final_count} out of {instance_count} requested Tor instances")
-            
-            if final_count == 0:
-                return False
-                
+            logger.info(f"Starting parallel creation of {instance_count} Tor instances with max {max_concurrent} concurrent tasks...")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            completed_count = loop.run_until_complete(
+                self._create_instances_async(instance_count, node_distributions, max_concurrent)
+            )
+        finally:
+            loop.close()
+        with self._lock:
+            final_count = len(self.instances)
+            balancer_count = len(self.added_to_balancer)
+        logger.info(f"Created {final_count} out of {instance_count} requested Tor instances")
+        logger.info(f"Load balancer has {balancer_count} proxies: {list(self.added_to_balancer)}")
+        if final_count == 0:
+            return False
+        with self._lock:
             self.running = True
-            self.exit_node_monitor.start_monitoring()
-            self._start_cleanup_thread()
-            self._update_load_balancer()
-            self._update_stats()
-            
-            logger.info(f"Pool started with {final_count} instances, updating load balancer...")
-            return True
+        self.exit_node_monitor.start_monitoring()
+        self._start_cleanup_thread()
+        self._update_stats()
+        logger.info(f"Pool started successfully with {final_count} instances, {balancer_count} in load balancer")
+        return True
             
     def stop(self):
         with self._lock:
@@ -184,14 +98,13 @@ class TorPoolManager:
                 
             instances_to_stop = list(self.instances.values())
             
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = [executor.submit(instance.stop) for instance in instances_to_stop]
-                
-                for future in as_completed(futures, timeout=30):
-                    try:
-                        future.result()
-                    except Exception:
-                        pass
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                loop.run_until_complete(self._stop_instances_async(instances_to_stop))
+            finally:
+                loop.close()
                         
             self.instances.clear()
             self._update_stats()
@@ -227,22 +140,13 @@ class TorPoolManager:
             
             logger.info(f"Starting Tor instance on port {port}...")
             if instance.start():
-                logger.info(f"Tor instance on port {port} started, waiting for readiness...")
-                
-                max_wait_cycles = 12
-                for cycle in range(max_wait_cycles):
-                    if instance.is_running and instance.is_healthy():
-                        with self._lock:
-                            self.instances[port] = instance
-                        logger.info(f"Tor instance on port {port} started successfully and is ready")
-                        return True
-                    
-                    logger.debug(f"Tor instance on port {port} not ready yet, waiting... (cycle {cycle + 1}/{max_wait_cycles})")
-                    time.sleep(5)
+                logger.info(f"Tor instance on port {port} started successfully")
                 
                 with self._lock:
                     self.instances[port] = instance
-                logger.warning(f"Tor instance on port {port} started but not fully ready after {max_wait_cycles * 5} seconds")
+                
+                logger.info(f"Adding port {port} to load balancer...")
+                self._add_to_load_balancer(port)
                 return True
             else:
                 logger.error(f"Failed to start Tor instance on port {port}")
@@ -322,13 +226,23 @@ class TorPoolManager:
         try:
             with self._lock:
                 healthy_count = 0
+                total_instances = len(self.instances)
+                logger.info(f"Updating load balancer with {total_instances} total instances...")
+                
                 for port, instance in self.instances.items():
+                    logger.debug(f"Checking instance {port}: running={instance.is_running}, healthy={instance.is_healthy()}")
                     if instance.is_running and instance.is_healthy():
                         if port not in self.added_to_balancer:
+                            logger.info(f"Adding healthy instance {port} to load balancer...")
                             self.load_balancer.add_proxy(port)
                             self.added_to_balancer.add(port)
                             healthy_count += 1
-                logger.info(f"Updated load balancer with {healthy_count} new healthy instances")
+                        else:
+                            logger.debug(f"Instance {port} already in load balancer")
+                    else:
+                        logger.warning(f"Instance {port} not healthy: running={instance.is_running}, healthy={instance.is_healthy()}")
+                        
+                logger.info(f"Load balancer update completed: {healthy_count} new instances added, {len(self.added_to_balancer)} total in balancer")
         except Exception as e:
             logger.error(f"Failed to update load balancer: {e}")
             import traceback
@@ -387,3 +301,67 @@ class TorPoolManager:
             self.stats['total_instances'] = len(self.instances)
             self.stats['running_instances'] = sum(1 for instance in self.instances.values() if instance.is_running)
             self.stats['last_update'] = datetime.now()
+            
+    async def _create_instances_async(self, instance_count: int, node_distributions: dict, max_concurrent: int) -> int:
+        semaphore = asyncio.Semaphore(max_concurrent)
+        tasks = []
+        all_ports = []
+        
+        for process_id in range(instance_count):
+            if process_id in node_distributions:
+                process_exit_nodes = node_distributions[process_id]['exit_nodes']
+                if process_exit_nodes:
+                    port = self._get_next_port()
+                    all_ports.append(port)
+                    task = self._create_instance_async(semaphore, port, process_exit_nodes, process_id)
+                    tasks.append(task)
+                else:
+                    logger.warning(f"Process {process_id} has no exit nodes assigned")
+            else:
+                logger.warning(f"Process {process_id} not found in node distributions")
+        
+        logger.info(f"Created {len(tasks)} async tasks for parallel execution (ports: {all_ports})")
+        
+        if not tasks:
+            return 0
+        
+        completed_count = 0
+        try:
+            results = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=30)
+            
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.error(f"Task {i} failed with exception: {result}")
+                elif result:
+                    completed_count += 1
+                    logger.info(f"Task {i} completed successfully ({completed_count}/{len(tasks)})")
+                else:
+                    logger.warning(f"Task {i} failed to start")
+        
+        except asyncio.TimeoutError:
+            logger.error("Timeout while creating instances")
+            
+        logger.info(f"Async instance creation completed: {completed_count}/{len(tasks)} successful")
+        
+        await asyncio.sleep(2)
+        return completed_count
+    
+    async def _create_instance_async(self, semaphore: asyncio.Semaphore, port: int, exit_nodes: List[str], process_id: int) -> bool:
+        async with semaphore:
+            return await asyncio.get_event_loop().run_in_executor(
+                None, self._create_instance_with_wait, port, exit_nodes
+            )
+        
+    async def _stop_instances_async(self, instances_to_stop: List[TorInstanceManager]):
+        if not instances_to_stop:
+            return
+            
+        tasks = []
+        for instance in instances_to_stop:
+            task = asyncio.get_event_loop().run_in_executor(None, instance.stop)
+            tasks.append(task)
+        
+        try:
+            await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=30)
+        except asyncio.TimeoutError:
+            logger.warning("Timeout while stopping instances")

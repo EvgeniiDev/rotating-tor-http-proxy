@@ -10,4 +10,4 @@
 8. Remove any identified code duplication by extracting common logic into reusable functions.
 9. Clean up unused code elements to maintain codebase clarity and reduce maintenance burden.
 10. Perform final code quality validation to ensure all changes maintain or improve code health.
-11. Always limit time of execution linux terminal commands.
+11. Always limit time of execution linux terminal commands. Use timeout 5s <command>
