@@ -176,7 +176,7 @@ class TorInstanceManager:
             finally:
                 self.process = None
                 
-    def _wait_for_startup(self, timeout: int = 30) -> bool:
+    def _wait_for_startup(self, timeout: int = 20) -> bool:
         start_time = time.time()
         
         while time.time() - start_time < timeout:
@@ -195,7 +195,7 @@ class TorInstanceManager:
             response = requests.get(
                 'http://httpbin.org/ip',
                 proxies=self._get_proxies(),
-                timeout=30
+                timeout=10
             )
             return response.status_code == 200
         except:
