@@ -79,28 +79,45 @@ class TorInstanceManager:
         return self.start()
         
     def is_healthy(self) -> bool:
-        try:
-            response = requests.get(
-                'http://httpbin.org/ip',
-                proxies=self._get_proxies(),
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                self.current_exit_ip = data.get('origin', '').strip()
-                self.failed_checks = 0
-                self.last_check = datetime.now()
+        urls = [
+            'https://httpbin.org/ip',
+            'https://api.ipify.org?format=json',
+            'https://icanhazip.com'
+        ]
+        
+        for url in urls:
+            try:
+                response = requests.get(
+                    url,
+                    proxies=self._get_proxies(),
+                    timeout=15
+                )
                 
-                if self.exit_node_monitor and self.current_exit_ip:
-                    self.exit_node_monitor.report_active_node(self.current_exit_ip)
+                if response.status_code == 200:
+                    if 'json' in response.headers.get('content-type', ''):
+                        data = response.json()
+                        if 'origin' in data:
+                            self.current_exit_ip = data['origin'].strip()
+                        elif 'ip' in data:
+                            self.current_exit_ip = data['ip'].strip()
+                    else:
+                        self.current_exit_ip = response.text.strip()
                     
-                return True
+                    self.failed_checks = 0
+                    self.last_check = datetime.now()
+                    
+                    if self.exit_node_monitor and self.current_exit_ip:
+                        self.exit_node_monitor.report_active_node(self.current_exit_ip)
+                    
+                    logger.debug(f"Port {self.port} health check passed with IP: {self.current_exit_ip}")
+                    return True
+                    
+            except Exception as e:
+                logger.debug(f"Port {self.port} health check failed for {url}: {e}")
+                continue
                 
-        except Exception:
-            pass
-            
         self.failed_checks += 1
+        logger.warning(f"Port {self.port} health check failed after trying all URLs. Failed checks: {self.failed_checks}")
         return False
         
     def get_status(self) -> dict:
@@ -176,30 +193,64 @@ class TorInstanceManager:
             finally:
                 self.process = None
                 
-    def _wait_for_startup(self, timeout: int = 20) -> bool:
+    def _wait_for_startup(self, timeout: int = 60) -> bool:
         start_time = time.time()
+        logger.info(f"Waiting for Tor instance on port {self.port} to start up...")
+        
+        retry_count = 0
+        max_retries_per_phase = 3
         
         while time.time() - start_time < timeout:
             if self.process and self.process.poll() is not None:
+                logger.error(f"Tor process on port {self.port} died during startup")
                 return False
-                
-            if self._test_connection():
-                return True
-                
-            time.sleep(1)
             
+            elapsed = time.time() - start_time
+            
+            if elapsed < 20:
+                if retry_count < max_retries_per_phase:
+                    if self._test_connection():
+                        logger.info(f"Tor instance on port {self.port} is ready")
+                        return True
+                    retry_count += 1
+                    logger.debug(f"Port {self.port} not ready yet, waiting... ({elapsed:.1f}s, try {retry_count})")
+                    time.sleep(3)
+                else:
+                    logger.debug(f"Port {self.port} still not ready after {max_retries_per_phase} tries, waiting longer... ({elapsed:.1f}s)")
+                    time.sleep(5)
+                    retry_count = 0
+            else:
+                if self._test_connection():
+                    logger.info(f"Tor instance on port {self.port} is ready")
+                    return True
+                logger.debug(f"Port {self.port} still bootstrapping... ({elapsed:.1f}s)")
+                time.sleep(4)
+            
+        logger.warning(f"Tor instance on port {self.port} failed to start within {timeout}s")
         return False
         
     def _test_connection(self) -> bool:
-        try:
-            response = requests.get(
-                'http://httpbin.org/ip',
-                proxies=self._get_proxies(),
-                timeout=10
-            )
-            return response.status_code == 200
-        except:
-            return False
+        test_urls = [
+            'https://httpbin.org/ip',
+            'https://api.ipify.org?format=json',
+            'https://icanhazip.com'
+        ]
+        
+        for url in test_urls:
+            try:
+                response = requests.get(
+                    url,
+                    proxies=self._get_proxies(),
+                    timeout=8
+                )
+                if response.status_code == 200:
+                    logger.debug(f"Port {self.port} connection test passed with {url}")
+                    return True
+            except Exception as e:
+                logger.debug(f"Port {self.port} connection test failed for {url}: {e}")
+                continue
+        
+        return False
             
     def _get_proxies(self) -> dict:
         return {

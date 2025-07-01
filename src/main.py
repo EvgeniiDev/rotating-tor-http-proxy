@@ -12,8 +12,8 @@ from config_manager import ConfigManager
 from tor_relay_manager import TorRelayManager
 
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(name)s - %(levelname)s - %(message)s'
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
 logger = logging.getLogger(__name__)

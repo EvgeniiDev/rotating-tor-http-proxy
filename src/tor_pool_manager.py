@@ -4,6 +4,7 @@ import time
 from typing import Dict, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+import queue
 
 from tor_instance_manager import TorInstanceManager
 from exit_node_monitor import ExitNodeMonitor, NodeRedistributor
@@ -19,6 +20,8 @@ class TorPoolManager:
         self.relay_manager = relay_manager
         
         self.instances: Dict[int, TorInstanceManager] = {}
+        self.added_to_balancer: set = set()
+        self.completion_queue = queue.Queue()
         self.next_port = 10000
         self.running = False
         
@@ -95,7 +98,40 @@ class TorPoolManager:
                     logger.info(f"Submitted {len(futures)} tasks for batch {batch_num} (ports: {batch_ports})")
                     
                     logger.info(f"Waiting for batch {batch_num} instances to be created...")
-                    time.sleep(8)
+                    
+                    start_wait = time.time()
+                    max_wait = 60
+                    
+                    while time.time() - start_wait < max_wait:
+                        # Process completed instances from the queue
+                        while True:
+                            try:
+                                port, instance = self.completion_queue.get_nowait()
+                                with self._lock:
+                                    self.instances[port] = instance
+                                    logger.info(f"Added instance {port} to dict from queue, total instances: {len(self.instances)}")
+                            except queue.Empty:
+                                break
+                        
+                        # Give worker threads a chance to acquire the lock
+                        time.sleep(0.5)
+                        
+                        with self._lock:
+                            current_count = sum(1 for port in batch_ports if port in self.instances)
+                            total_instances = len(self.instances)
+                            instance_keys = list(self.instances.keys())
+                        
+                        logger.debug(f"Batch {batch_num}: checking {len(batch_ports)} ports: {batch_ports}")
+                        logger.debug(f"Batch {batch_num}: instances dict has {total_instances} total instances: {instance_keys}")
+                        logger.debug(f"Batch {batch_num}: found {current_count} matching instances")
+                        
+                        if current_count >= len(batch_ports):
+                            logger.info(f"All {current_count} instances in batch {batch_num} have been created")
+                            break
+                        
+                        elapsed = time.time() - start_wait
+                        logger.debug(f"Batch {batch_num}: {current_count}/{len(batch_ports)} instances created after {elapsed:.1f}s")
+                        time.sleep(1.5)  # Longer sleep to allow worker threads to work
                     
                     with self._lock:
                         completed_count = sum(1 for port in batch_ports if port in self.instances)
@@ -122,9 +158,13 @@ class TorPoolManager:
                                     instance = self.instances[port]
                                     if instance.is_running and instance.is_healthy():
                                         ready_count += 1
+                                        self._add_to_load_balancer(port)
+                                        logger.debug(f"Port {port} is healthy and ready, added to load balancer")
                                     elif not instance.is_running or (instance.process and instance.process.poll() is not None):
                                         failed_ports.add(port)
                                         logger.warning(f"Instance on port {port} failed to start properly, marking for removal")
+                                    else:
+                                        logger.debug(f"Port {port} is running but not healthy yet")
                                 else:
                                     if (time.time() - start_time) > 30:
                                         failed_ports.add(port)
@@ -233,12 +273,10 @@ class TorPoolManager:
             logger.info(f"Starting Tor instance on port {port}...")
             if instance.start():
                 logger.info(f"Tor instance on port {port} started, adding to instances dict...")
-                with self._lock:
-                    self.instances[port] = instance
-                    logger.info(f"Added instance {port} to dict, total instances: {len(self.instances)}")
+                self.completion_queue.put((port, instance))
+                logger.info(f"Tor instance on port {port} queued for addition to instances dict")
                     
-                self._add_to_load_balancer(port)
-                logger.info(f"Tor instance on port {port} started and added to load balancer")
+                logger.info(f"Tor instance on port {port} started successfully")
                 return True
             else:
                 logger.error(f"Failed to start Tor instance on port {port}")
@@ -269,23 +307,42 @@ class TorPoolManager:
             
     def _add_to_load_balancer(self, port: int):
         try:
-            self.load_balancer.add_proxy(port)
-        except Exception:
-            pass
+            if port not in self.added_to_balancer:
+                logger.info(f"Adding port {port} to load balancer...")
+                self.load_balancer.add_proxy(port)
+                self.added_to_balancer.add(port)
+                logger.info(f"Successfully added port {port} to load balancer")
+            else:
+                logger.debug(f"Port {port} already added to load balancer")
+        except Exception as e:
+            logger.error(f"Failed to add port {port} to load balancer: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             
     def _remove_from_load_balancer(self, port: int):
         try:
-            self.load_balancer.remove_proxy(port)
-        except Exception:
-            pass
+            if port in self.added_to_balancer:
+                self.load_balancer.remove_proxy(port)
+                self.added_to_balancer.remove(port)
+                logger.info(f"Removed port {port} from load balancer")
+        except Exception as e:
+            logger.error(f"Failed to remove port {port} from load balancer: {e}")
             
     def _update_load_balancer(self):
         try:
             with self._lock:
-                for port in self.instances.keys():
-                    self.load_balancer.add_proxy(port)
-        except Exception:
-            pass
+                healthy_count = 0
+                for port, instance in self.instances.items():
+                    if instance.is_running and instance.is_healthy():
+                        if port not in self.added_to_balancer:
+                            self.load_balancer.add_proxy(port)
+                            self.added_to_balancer.add(port)
+                            healthy_count += 1
+                logger.info(f"Updated load balancer with {healthy_count} new healthy instances")
+        except Exception as e:
+            logger.error(f"Failed to update load balancer: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
         
     def _start_cleanup_thread(self):
         if self._cleanup_thread and self._cleanup_thread.is_alive():
