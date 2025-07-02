@@ -8,6 +8,7 @@ import tempfile
 from typing import List, Optional
 from datetime import datetime
 from utils import safe_stop_thread
+import os, signal
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +24,10 @@ CONNECTION_TEST_TIMEOUT = 8
 
 
 class TorInstanceManager:
-    def __init__(self, port: int, exit_nodes: List[str], config_manager, exit_node_monitor=None):
+    def __init__(self, port: int, exit_nodes: List[str], config_manager):
         self.port = port
         self.exit_nodes = exit_nodes
         self.config_manager = config_manager
-        self.exit_node_monitor = exit_node_monitor
         
         self.process = None
         self.config_file = None
@@ -109,9 +109,6 @@ class TorInstanceManager:
                     
                     self.failed_checks = 0
                     self.last_check = datetime.now()
-                    
-                    if self.exit_node_monitor and self.current_exit_ip:
-                        self.exit_node_monitor.report_active_node(self.current_exit_ip)
                     
                     logger.debug(f"Port {self.port} health check passed with IP: {self.current_exit_ip}")
                     return True
@@ -196,6 +193,23 @@ class TorInstanceManager:
                 logger.error(f"Error stopping Tor process for port {self.port}: {e}")
             finally:
                 self.process = None
+    def reload_exit_nodes(self, new_exit_nodes: List[str]) -> bool:
+        with self._lock:
+            if not self.is_running or not self.process:
+                return False
+            self.exit_nodes = new_exit_nodes
+            try:
+                config_content = self.config_manager.get_tor_config_by_port(
+                    self.port,
+                    self.exit_nodes
+                )
+                with open(self.config_file, 'w') as f:
+                    f.write(config_content)
+                os.killpg(os.getpgid(self.process.pid), signal.SIGHUP)
+                return True
+            except Exception as e:
+                logger.error(f"Failed to reload tor config for port {self.port}: {e}")
+                return False
                 
     def _wait_for_startup(self, timeout: int = 60) -> bool:
         start_time = time.time()

@@ -7,7 +7,6 @@ from datetime import datetime
 from utils import safe_stop_thread
 
 from tor_instance_manager import TorInstanceManager
-from exit_node_monitor import ExitNodeMonitor, NodeRedistributor
 from balancer_diagnostics import BalancerDiagnostics
 
 
@@ -29,12 +28,6 @@ class TorPoolManager:
         self._cleanup_thread = None
         self._shutdown_event = threading.Event()
         
-        self.exit_node_monitor = ExitNodeMonitor()
-        self.node_redistributor = NodeRedistributor(
-            self.exit_node_monitor, 
-            self, 
-            self.relay_manager
-        )
         
         self.stats = {
             'total_instances': 0,
@@ -81,7 +74,6 @@ class TorPoolManager:
             return False
         with self._lock:
             self.running = True
-        self.exit_node_monitor.start_monitoring()
         self._start_cleanup_thread()
         self._update_stats()
         logger.info(f"Pool started successfully with {final_count} instances, {balancer_count} in load balancer")
@@ -95,7 +87,6 @@ class TorPoolManager:
             self.running = False
             self._shutdown_event.set()
             
-            self.exit_node_monitor.stop_monitoring()
             
             safe_stop_thread(self._cleanup_thread)
                 
@@ -114,18 +105,10 @@ class TorPoolManager:
             
     def get_stats(self) -> dict:
         with self._lock:
-            basic_stats = self.stats.copy()
-            monitor_stats = self.exit_node_monitor.get_stats()
-            basic_stats.update({
-                'exit_node_monitoring': monitor_stats
-            })
-            return basic_stats
+            return self.stats.copy()
             
     def redistribute_nodes(self) -> bool:
-        return self.node_redistributor.redistribute_nodes()
-        
-    def refresh_backup_nodes(self) -> bool:
-        return self.node_redistributor.refresh_backup_nodes()
+        return True
         
     def get_instance_statuses(self) -> List[dict]:
         with self._lock:
@@ -137,8 +120,7 @@ class TorPoolManager:
             instance = TorInstanceManager(
                 port=port,
                 exit_nodes=exit_nodes,
-                config_manager=self.config_manager,
-                exit_node_monitor=self.exit_node_monitor
+                config_manager=self.config_manager
             )
             
             logger.info(f"Starting Tor instance on port {port}...")
