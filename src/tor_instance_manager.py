@@ -20,8 +20,8 @@ TEST_URLS = [
 ]
 
 HTTP_OK = 200
-REQUEST_TIMEOUT = 15
-CONNECTION_TEST_TIMEOUT = 8
+REQUEST_TIMEOUT = 30
+CONNECTION_TEST_TIMEOUT = 30
 
 
 class TorInstanceManager:
@@ -29,7 +29,6 @@ class TorInstanceManager:
         self.port = port
         self.exit_nodes = exit_nodes
         self.config_manager = config_manager
-        
         self.process = None
         self.config_file = None
         self.is_running = False
@@ -37,17 +36,21 @@ class TorInstanceManager:
         self.max_failures = 3
         self.last_check = None
         self.current_exit_ip = None
-        self.check_interval = 30
-        
+        self.check_interval = 5
         self._lock = threading.RLock()
         self._monitor_thread = None
         self._shutdown_event = threading.Event()
-        
         self.exit_node_activity: Dict[str, datetime] = {}
         self.suspicious_nodes: Set[str] = set()
         self.blacklisted_nodes: Set[str] = set()
         self.node_usage_count: Dict[str, int] = defaultdict(int)
         self.inactive_threshold = timedelta(minutes=60)
+        self._log_exit_nodes()
+
+    def _log_exit_nodes(self):
+        log_path = os.path.expanduser(f"~/tor_exit_nodes.log")
+        with open(log_path, "a") as f:
+            f.write(f"port={self.port} ips={','.join(self.exit_nodes)}\n")
         
     def start(self) -> bool:
         with self._lock:
