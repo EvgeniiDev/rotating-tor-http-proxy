@@ -5,9 +5,10 @@ import time
 import requests
 import os
 import tempfile
-from typing import List, Optional
-from datetime import datetime
+from typing import List, Optional, Dict, Set
+from datetime import datetime, timedelta
 from utils import safe_stop_thread
+from collections import defaultdict
 import os, signal
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,12 @@ class TorInstanceManager:
         self._lock = threading.RLock()
         self._monitor_thread = None
         self._shutdown_event = threading.Event()
+        
+        self.exit_node_activity: Dict[str, datetime] = {}
+        self.suspicious_nodes: Set[str] = set()
+        self.blacklisted_nodes: Set[str] = set()
+        self.node_usage_count: Dict[str, int] = defaultdict(int)
+        self.inactive_threshold = timedelta(minutes=60)
         
     def start(self) -> bool:
         with self._lock:
@@ -110,6 +117,9 @@ class TorInstanceManager:
                     self.failed_checks = 0
                     self.last_check = datetime.now()
                     
+                    if self.current_exit_ip:
+                        self._report_active_exit_node(self.current_exit_ip)
+                    
                     logger.debug(f"Port {self.port} health check passed with IP: {self.current_exit_ip}")
                     return True
                     
@@ -122,6 +132,7 @@ class TorInstanceManager:
         return False
         
     def get_status(self) -> dict:
+        exit_stats = self.get_exit_node_stats()
         return {
             'port': self.port,
             'is_running': self.is_running,
@@ -129,7 +140,8 @@ class TorInstanceManager:
             'exit_nodes_count': len(self.exit_nodes),
             'failed_checks': self.failed_checks,
             'last_check': self.last_check,
-            'process_alive': self.process and self.process.poll() is None
+            'process_alive': self.process and self.process.poll() is None,
+            'exit_node_monitoring': exit_stats
         }
         
     def _create_config(self) -> bool:
@@ -287,6 +299,8 @@ class TorInstanceManager:
                 if not self.is_healthy() and self.failed_checks >= self.max_failures:
                     if not self.restart():
                         break
+                
+                self._check_inactive_exit_nodes()
                         
                 self._shutdown_event.wait(self.check_interval)
                 
@@ -302,3 +316,88 @@ class TorInstanceManager:
                 pass
             finally:
                 self.config_file = None
+
+    def _report_active_exit_node(self, ip: str):
+        with self._lock:
+            self.exit_node_activity[ip] = datetime.now()
+            self.node_usage_count[ip] += 1
+            
+            if ip in self.suspicious_nodes:
+                self.suspicious_nodes.remove(ip)
+                logger.info(f"Exit node {ip} on port {self.port} recovered from suspicious list")
+
+    def get_inactive_exit_nodes(self) -> List[str]:
+        with self._lock:
+            current_time = datetime.now()
+            inactive = []
+            
+            for ip, last_seen in self.exit_node_activity.items():
+                if current_time - last_seen > self.inactive_threshold:
+                    inactive.append(ip)
+                    
+            return inactive
+
+    def get_suspicious_exit_nodes(self) -> List[str]:
+        with self._lock:
+            return list(self.suspicious_nodes)
+
+    def get_blacklisted_exit_nodes(self) -> List[str]:
+        with self._lock:
+            return list(self.blacklisted_nodes)
+
+    def blacklist_exit_node(self, ip: str):
+        with self._lock:
+            self.blacklisted_nodes.add(ip)
+            self.suspicious_nodes.discard(ip)
+            if ip in self.exit_node_activity:
+                del self.exit_node_activity[ip]
+            logger.warning(f"Exit node {ip} blacklisted on port {self.port}")
+
+    def is_exit_node_healthy(self, ip: str) -> bool:
+        with self._lock:
+            return ip not in self.blacklisted_nodes and ip not in self.suspicious_nodes
+
+    def get_exit_node_stats(self) -> dict:
+        with self._lock:
+            current_time = datetime.now()
+            active_count = 0
+            inactive_count = 0
+            
+            for ip, last_seen in self.exit_node_activity.items():
+                if current_time - last_seen <= self.inactive_threshold:
+                    active_count += 1
+                else:
+                    inactive_count += 1
+                    
+            return {
+                'port': self.port,
+                'total_tracked_nodes': len(self.exit_node_activity),
+                'active_nodes': active_count,
+                'inactive_nodes': inactive_count,
+                'suspicious_nodes': len(self.suspicious_nodes),
+                'blacklisted_nodes': len(self.blacklisted_nodes),
+                'most_used_nodes': sorted(
+                    self.node_usage_count.items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )[:5]
+            }
+
+    def _check_inactive_exit_nodes(self):
+        with self._lock:
+            current_time = datetime.now()
+            newly_suspicious = []
+            
+            for ip, last_seen in list(self.exit_node_activity.items()):
+                if current_time - last_seen > self.inactive_threshold:
+                    if ip not in self.suspicious_nodes and ip not in self.blacklisted_nodes:
+                        self.suspicious_nodes.add(ip)
+                        newly_suspicious.append(ip)
+                        
+            if newly_suspicious:
+                logger.warning(f"Port {self.port}: Marked {len(newly_suspicious)} exit nodes as suspicious: {newly_suspicious[:3]}...")
+
+    def get_healthy_exit_nodes(self) -> List[str]:
+        with self._lock:
+            return [node for node in self.exit_nodes 
+                   if node not in self.blacklisted_nodes and node not in self.suspicious_nodes]

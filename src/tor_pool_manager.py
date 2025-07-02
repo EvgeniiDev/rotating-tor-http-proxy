@@ -2,9 +2,10 @@ import asyncio
 import logging
 import threading
 import time
-from typing import Dict, List
-from datetime import datetime
+from typing import Dict, List, Set
+from datetime import datetime, timedelta
 from utils import safe_stop_thread
+from collections import defaultdict
 
 from tor_instance_manager import TorInstanceManager
 from balancer_diagnostics import BalancerDiagnostics
@@ -34,6 +35,10 @@ class TorPoolManager:
             'running_instances': 0,
             'last_update': None
         }
+        
+        self.global_exit_node_stats: Dict[str, dict] = {}
+        self.global_suspicious_nodes: Set[str] = set()
+        self.global_blacklisted_nodes: Set[str] = set()
         
         self.diagnostics = BalancerDiagnostics(self, load_balancer)
         
@@ -105,11 +110,11 @@ class TorPoolManager:
             
     def get_stats(self) -> dict:
         with self._lock:
-            return self.stats.copy()
-            
-    def redistribute_nodes(self) -> bool:
-        return True
-        
+            base_stats = self.stats.copy()
+            exit_stats = self.get_exit_node_global_stats()
+            base_stats['exit_node_monitoring'] = exit_stats['global_totals']
+            return base_stats
+
     def get_instance_statuses(self) -> List[dict]:
         with self._lock:
             return [instance.get_status() for instance in self.instances.values()]
@@ -244,6 +249,7 @@ class TorPoolManager:
         redistribution_counter = 0
         balancer_check_counter = 0
         aggressive_add_counter = 0
+        exit_node_monitor_counter = 0
         
         while not self._shutdown_event.is_set() and self.running:
             try:
@@ -259,6 +265,11 @@ class TorPoolManager:
                 if aggressive_add_counter >= 3:
                     self._aggressive_add_running_instances()
                     aggressive_add_counter = 0
+                
+                exit_node_monitor_counter += 1
+                if exit_node_monitor_counter >= 2:
+                    self._update_global_exit_node_monitoring()
+                    exit_node_monitor_counter = 0
                 
                 redistribution_counter += 1
                 if redistribution_counter >= 5:
@@ -383,3 +394,108 @@ class TorPoolManager:
             await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=30)
         except asyncio.TimeoutError:
             logger.warning("Timeout while stopping instances")
+    
+    def get_exit_node_global_stats(self) -> dict:
+        with self._lock:
+            all_stats = {}
+            total_tracked = 0
+            total_active = 0
+            total_inactive = 0
+            total_suspicious = 0
+            total_blacklisted = 0
+            
+            for instance in self.instances.values():
+                stats = instance.get_exit_node_stats()
+                all_stats[stats['port']] = stats
+                total_tracked += stats['total_tracked_nodes']
+                total_active += stats['active_nodes']
+                total_inactive += stats['inactive_nodes']
+                total_suspicious += stats['suspicious_nodes']
+                total_blacklisted += stats['blacklisted_nodes']
+            
+            return {
+                'instances': all_stats,
+                'global_totals': {
+                    'total_tracked_nodes': total_tracked,
+                    'active_nodes': total_active,
+                    'inactive_nodes': total_inactive,
+                    'suspicious_nodes': total_suspicious,
+                    'blacklisted_nodes': total_blacklisted,
+                    'global_suspicious_count': len(self.global_suspicious_nodes),
+                    'global_blacklisted_count': len(self.global_blacklisted_nodes)
+                }
+            }
+
+    def blacklist_exit_node_globally(self, ip: str):
+        with self._lock:
+            self.global_blacklisted_nodes.add(ip)
+            self.global_suspicious_nodes.discard(ip)
+            
+            for instance in self.instances.values():
+                instance.blacklist_exit_node(ip)
+            
+            logger.warning(f"Exit node {ip} blacklisted globally across all instances")
+
+    def get_global_suspicious_nodes(self) -> List[str]:
+        with self._lock:
+            return list(self.global_suspicious_nodes)
+
+    def get_global_blacklisted_nodes(self) -> List[str]:
+        with self._lock:
+            return list(self.global_blacklisted_nodes)
+
+    def _update_global_exit_node_monitoring(self):
+        with self._lock:
+            newly_suspicious = set()
+            
+            for instance in self.instances.values():
+                suspicious = instance.get_suspicious_exit_nodes()
+                for node in suspicious:
+                    if node not in self.global_suspicious_nodes and node not in self.global_blacklisted_nodes:
+                        newly_suspicious.add(node)
+                        
+            self.global_suspicious_nodes.update(newly_suspicious)
+            
+            if newly_suspicious:
+                logger.warning(f"Added {len(newly_suspicious)} nodes to global suspicious list: {list(newly_suspicious)[:3]}...")
+
+    def redistribute_nodes(self):
+        with self._lock:
+            if not self.running or not self.instances:
+                return
+            
+            logger.info("Starting exit node redistribution...")
+            
+            healthy_instances = []
+            for port, instance in self.instances.items():
+                if instance.is_running:
+                    healthy_nodes = instance.get_healthy_exit_nodes()
+                    if healthy_nodes:
+                        healthy_instances.append((port, instance, healthy_nodes))
+            
+            if not healthy_instances:
+                logger.warning("No healthy instances found for redistribution")
+                return
+            
+            redistributed_count = 0
+            for port, instance, healthy_nodes in healthy_instances:
+                if len(healthy_nodes) < len(instance.exit_nodes) * 0.5:
+                    logger.info(f"Instance {port} has low healthy nodes ratio: {len(healthy_nodes)}/{len(instance.exit_nodes)}")
+                    
+                    relay_data = self.relay_manager.fetch_tor_relays()
+                    if relay_data:
+                        new_exit_nodes = self.relay_manager.extract_relay_ips(relay_data)
+                        if new_exit_nodes:
+                            filtered_nodes = [node for node in new_exit_nodes 
+                                            if node not in self.global_blacklisted_nodes 
+                                            and node not in self.global_suspicious_nodes]
+                            
+                            if len(filtered_nodes) > len(instance.exit_nodes):
+                                if instance.reload_exit_nodes(filtered_nodes[:len(instance.exit_nodes)]):
+                                    redistributed_count += 1
+                                    logger.info(f"Redistributed nodes for instance {port}")
+            
+            if redistributed_count > 0:
+                logger.info(f"Completed redistribution for {redistributed_count} instances")
+            else:
+                logger.debug("No instances needed redistribution")
