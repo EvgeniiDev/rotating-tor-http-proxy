@@ -13,6 +13,7 @@ class HTTPLoadBalancer:
         self.listen_port = listen_port
         self.proxy_balancer: ProxyBalancer = None
         self.proxy_monitor: StatsReporter = None
+        self._lock = threading.Lock()
         self.config = {
             "server": {
                 "host": "0.0.0.0",
@@ -25,7 +26,6 @@ class HTTPLoadBalancer:
             "max_retries": 3
         }
         self.proxy_ports: List[int] = []
-        self._lock = threading.Lock()
 
 
     def add_proxy(self, port: int):
@@ -40,7 +40,8 @@ class HTTPLoadBalancer:
             self.config["proxies"].append(proxy_config)
             
             if self.proxy_balancer:
-                self.proxy_balancer.update_proxies(self.config)
+                config_copy = self.config.copy()
+                self.proxy_balancer.update_proxies(config_copy)
                 logger.info(f"Added SOCKS5 proxy on port {port}")
             else:
                 logger.warning(f"Proxy balancer not started, proxy on port {port} will be added when balancer starts")
@@ -55,7 +56,8 @@ class HTTPLoadBalancer:
             self.config["proxies"] = [p for p in self.config["proxies"] if p["port"] != port]
             
             if self.proxy_balancer:
-                self.proxy_balancer.update_proxies(self.config)
+                config_copy = self.config.copy()
+                self.proxy_balancer.update_proxies(config_copy)
                 logger.info(f"Removed SOCKS5 proxy on port {port}")
             else:
                 logger.warning(f"Proxy balancer not started, cannot remove proxy on port {port}")
@@ -67,8 +69,11 @@ class HTTPLoadBalancer:
             return
 
         try:
-            self.proxy_balancer = ProxyBalancer(self.config)
-            logger.info(f"HTTP Load Balancer created with config: {self.config}")
+            with self._lock:
+                config_copy = self.config.copy()
+            
+            self.proxy_balancer = ProxyBalancer(config_copy)
+            logger.info(f"HTTP Load Balancer created with config: {config_copy}")
             
             self.proxy_balancer.start()
             logger.info(f"HTTP Load Balancer started on port {self.listen_port}")
