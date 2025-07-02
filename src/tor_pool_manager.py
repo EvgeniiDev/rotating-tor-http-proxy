@@ -8,6 +8,7 @@ from utils import safe_stop_thread
 
 from tor_instance_manager import TorInstanceManager
 from exit_node_monitor import ExitNodeMonitor, NodeRedistributor
+from balancer_diagnostics import BalancerDiagnostics
 
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,8 @@ class TorPoolManager:
             'running_instances': 0,
             'last_update': None
         }
+        
+        self.diagnostics = BalancerDiagnostics(self, load_balancer)
         
     def start(self, instance_count: int, max_concurrent: int = 5) -> bool:
         with self._lock:
@@ -208,17 +211,33 @@ class TorPoolManager:
                 logger.info(f"Updating load balancer with {total_instances} total instances...")
                 
                 for port, instance in self.instances.items():
-                    logger.debug(f"Checking instance {port}: running={instance.is_running}, healthy={instance.is_healthy()}")
-                    if instance.is_running and instance.is_healthy():
+                    if instance.is_running:
                         if port not in self.added_to_balancer:
-                            logger.info(f"Adding healthy instance {port} to load balancer...")
-                            self.load_balancer.add_proxy(port)
-                            self.added_to_balancer.add(port)
-                            healthy_count += 1
+                            try:
+                                is_healthy = instance.is_healthy()
+                                logger.debug(f"Instance {port}: running=True, healthy={is_healthy}, failed_checks={instance.failed_checks}")
+                                
+                                if is_healthy:
+                                    logger.info(f"Adding healthy instance {port} to load balancer...")
+                                    self.load_balancer.add_proxy(port)
+                                    self.added_to_balancer.add(port)
+                                    healthy_count += 1
+                                else:
+                                    if instance.failed_checks >= 10:
+                                        logger.warning(f"Instance {port} has {instance.failed_checks} failed checks but is running - adding anyway")
+                                        self.load_balancer.add_proxy(port)
+                                        self.added_to_balancer.add(port)
+                                        healthy_count += 1
+                                    else:
+                                        logger.debug(f"Instance {port} not healthy yet (failed_checks={instance.failed_checks}), will retry")
+                            except Exception as e:
+                                logger.error(f"Failed to add {port} to balancer: {e}")
                         else:
                             logger.debug(f"Instance {port} already in load balancer")
                     else:
-                        logger.warning(f"Instance {port} not healthy: running={instance.is_running}, healthy={instance.is_healthy()}")
+                        logger.warning(f"Instance {port} not running")
+                        if port in self.added_to_balancer:
+                            self._remove_from_load_balancer(port)
                         
                 logger.info(f"Load balancer update completed: {healthy_count} new instances added, {len(self.added_to_balancer)} total in balancer")
         except Exception as e:
@@ -241,23 +260,60 @@ class TorPoolManager:
         logger.debug("Started cleanup thread")
         
         redistribution_counter = 0
+        balancer_check_counter = 0
+        aggressive_add_counter = 0
         
         while not self._shutdown_event.is_set() and self.running:
             try:
                 self._check_dead_instances()
                 self._update_stats()
                 
+                balancer_check_counter += 1
+                if balancer_check_counter >= 1:
+                    self._update_load_balancer()
+                    balancer_check_counter = 0
+                
+                aggressive_add_counter += 1
+                if aggressive_add_counter >= 3:
+                    self._aggressive_add_running_instances()
+                    aggressive_add_counter = 0
+                
                 redistribution_counter += 1
                 if redistribution_counter >= 5:
                     self.redistribute_nodes()
                     redistribution_counter = 0
                     
-                self._shutdown_event.wait(60)
+                self._shutdown_event.wait(30)
             except Exception as e:
                 logger.error(f"Error in cleanup loop: {e}")
                 time.sleep(10)
                 
         logger.debug("Stopped cleanup thread")
+        
+    def _aggressive_add_running_instances(self):
+        try:
+            with self._lock:
+                added_count = 0
+                total_running = 0
+                
+                for port, instance in self.instances.items():
+                    if instance.is_running:
+                        total_running += 1
+                        if port not in self.added_to_balancer:
+                            try:
+                                logger.info(f"Aggressively adding running instance {port} (failed_checks={instance.failed_checks})")
+                                self.load_balancer.add_proxy(port)
+                                self.added_to_balancer.add(port)
+                                added_count += 1
+                            except Exception as e:
+                                logger.error(f"Failed to aggressively add {port}: {e}")
+                
+                if added_count > 0:
+                    logger.info(f"Aggressively added {added_count} running instances to balancer")
+                    logger.info(f"Status: {total_running} total running, {len(self.added_to_balancer)} in balancer")
+                    
+        except Exception as e:
+            logger.error(f"Error in aggressive add: {e}")
         
     def _check_dead_instances(self):
         dead_instances = []
