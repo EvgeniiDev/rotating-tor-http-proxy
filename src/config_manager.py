@@ -7,6 +7,8 @@ logger = logging.getLogger(__name__)
 
 
 class ConfigManager:
+    __slots__ = ('data_dir',)
+    
     def __init__(self):
         self.data_dir = os.path.expanduser('~/tor-http-proxy/data')
         
@@ -43,6 +45,7 @@ class ConfigManager:
             raise ValueError("No valid IPv4 exit nodes provided")
         
         exit_nodes_str = ','.join(ipv4_nodes)
+        del ipv4_nodes
         
         config_lines = [
             f"SocksPort 127.0.0.1:{socks_port}",
@@ -63,4 +66,6 @@ class ConfigManager:
             "EnforceDistinctSubnets 1",
         ]
         
-        return '\n'.join(config_lines)
+        result = '\n'.join(config_lines)
+        del config_lines
+        return result

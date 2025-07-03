@@ -7,6 +7,8 @@ logger = logging.getLogger(__name__)
 
 
 class TorRelayManager:
+    __slots__ = ('current_relays', 'exit_nodes_by_probability')
+    
     def __init__(self):
         self.current_relays = []
         self.exit_nodes_by_probability = []
@@ -53,6 +55,7 @@ class TorRelayManager:
         self.current_relays = exit_nodes
         self.exit_nodes_by_probability = exit_nodes
         
+        del seen_ips
         return exit_nodes
     
     def distribute_exit_nodes(self, num_processes: int) -> Dict[int, List[str]]:
@@ -118,19 +121,19 @@ class TorRelayManager:
         unique_count = len(unique_ips)
         
         if total_assigned != unique_count:
-            duplicates = []
             ip_counts = {}
             for ip in all_assigned_ips:
                 ip_counts[ip] = ip_counts.get(ip, 0) + 1
             
-            for ip, count in ip_counts.items():
-                if count > 1:
-                    duplicates.append((ip, count))
+            duplicates = [(ip, count) for ip, count in ip_counts.items() if count > 1]
             
             logger.error(f"Found {total_assigned - unique_count} duplicate IP assignments:")
-            for ip, count in duplicates:
+            for ip, count in duplicates[:5]:
                 logger.error(f"  IP {ip} assigned {count} times")
+                
+            del ip_counts, duplicates, all_assigned_ips
             return False
         
         logger.info(f"Distribution validation passed: {unique_count} unique IPs assigned across all processes")
+        del all_assigned_ips, unique_ips
         return True

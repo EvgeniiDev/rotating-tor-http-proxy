@@ -1,6 +1,5 @@
 import logging
 import threading
-import traceback
 import requests
 from typing import List, Dict, Any
 from proxy_load_balancer import ProxyBalancer, StatsReporter
@@ -9,6 +8,10 @@ logger = logging.getLogger(__name__)
 
 
 class HTTPLoadBalancer:
+    __slots__ = (
+        'listen_port', 'proxy_balancer', 'proxy_monitor', '_lock',
+        'config', 'proxy_ports'
+    )
     def __init__(self, listen_port: int = 8080):
         self.listen_port = listen_port
         self.proxy_balancer: ProxyBalancer = None
@@ -83,7 +86,6 @@ class HTTPLoadBalancer:
             
         except Exception as e:
             logger.error(f"Failed to start HTTP load balancer: {e}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
             raise
 
     def stop(self):
@@ -102,6 +104,11 @@ class HTTPLoadBalancer:
             except Exception as e:
                 logger.error(f"Error stopping proxy balancer: {e}")
             self.proxy_balancer = None
+            
+        with self._lock:
+            self.proxy_ports.clear()
+            self.config["proxies"].clear()
+            
         logger.info("HTTP Load Balancer stopped successfully")
 
     def get_stats(self) -> Dict[str, Any]:
