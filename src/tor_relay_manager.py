@@ -30,10 +30,7 @@ class TorRelayManager:
                 exit_prob = relay.get('exit_probability', 0)
                 
                 if isinstance(exit_prob, str):
-                    try:
-                        exit_prob = float(exit_prob)
-                    except (ValueError, TypeError):
-                        exit_prob = 0
+                    exit_prob = float(exit_prob)
 
                 if exit_prob > 0:
                     for addr in relay['or_addresses']:
@@ -55,7 +52,6 @@ class TorRelayManager:
         self.current_relays = exit_nodes
         self.exit_nodes_by_probability = exit_nodes
         
-        del seen_ips
         return exit_nodes
     
     def distribute_exit_nodes(self, num_processes: int) -> Dict[int, List[str]]:
@@ -131,9 +127,7 @@ class TorRelayManager:
             for ip, count in duplicates[:5]:
                 logger.error(f"  IP {ip} assigned {count} times")
                 
-            del ip_counts, duplicates, all_assigned_ips
             return False
         
         logger.info(f"Distribution validation passed: {unique_count} unique IPs assigned across all processes")
-        del all_assigned_ips, unique_ips
         return True
