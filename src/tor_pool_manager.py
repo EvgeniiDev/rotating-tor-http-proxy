@@ -132,10 +132,10 @@ class TorPoolManager:
             if instance.start():
                 logger.info(f"Tor instance started successfully on port {port}")
                 
+                with self._lock:
+                    self.instances[port] = instance
+                
                 if add_to_pool:
-                    with self._lock:
-                        self.instances[port] = instance
-                    
                     logger.info(f"Adding port {port} to load balancer...")
                     self._add_to_load_balancer(port)
                 
@@ -373,12 +373,17 @@ class TorPoolManager:
         logger.info(f"Async instance creation completed: {completed_count}/{len(tasks)} successful")
         
         await asyncio.sleep(2)
+        
+        if completed_count > 0:
+            logger.info(f"Adding all {completed_count} successful instances to load balancer...")
+            self._add_all_instances_to_balancer()
+        
         return completed_count
     
     async def _create_instance_async(self, semaphore: asyncio.Semaphore, port: int, exit_nodes: List[str], process_id: int) -> bool:
         async with semaphore:
             return await asyncio.get_event_loop().run_in_executor(
-                None, self._create_instance, port, exit_nodes, True
+                None, self._create_instance, port, exit_nodes, False
             )
         
     async def _stop_instances_async(self, instances_to_stop: List[TorInstanceManager]):
@@ -499,3 +504,27 @@ class TorPoolManager:
                 logger.info(f"Completed redistribution for {redistributed_count} instances")
             else:
                 logger.debug("No instances needed redistribution")
+                
+    def _add_all_instances_to_balancer(self):
+        with self._lock:
+            added_count = 0
+            total_running = 0
+            
+            for port, instance in self.instances.items():
+                if instance.is_running:
+                    total_running += 1
+                    if port not in self.added_to_balancer:
+                        try:
+                            logger.info(f"Adding running instance {port} to load balancer...")
+                            self.load_balancer.add_proxy(port)
+                            self.added_to_balancer.add(port)
+                            added_count += 1
+                        except Exception as e:
+                            logger.error(f"Failed to add port {port} to load balancer: {e}")
+                    else:
+                        logger.debug(f"Port {port} already in load balancer")
+                else:
+                    logger.warning(f"Instance {port} not running, skipping")
+            
+            logger.info(f"Added {added_count} instances to load balancer")
+            logger.info(f"Status: {total_running} total running, {len(self.added_to_balancer)} in balancer")
