@@ -39,6 +39,8 @@ class HTTPLoadBalancer:
             self.proxy_ports.append(port)
             self.config["proxies"].append(proxy_config)
             
+            print(f"Config updated after adding proxy {port}: {self.config}")
+            
             if self.proxy_balancer:
                 config_copy = self.config.copy()
                 self.proxy_balancer.update_proxies(config_copy)
@@ -54,6 +56,8 @@ class HTTPLoadBalancer:
 
             self.proxy_ports.remove(port)
             self.config["proxies"] = [p for p in self.config["proxies"] if p["port"] != port]
+            
+            print(f"Config updated after removing proxy {port}: {self.config}")
             
             if self.proxy_balancer:
                 config_copy = self.config.copy()
