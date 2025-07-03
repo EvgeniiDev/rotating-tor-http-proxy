@@ -2,7 +2,7 @@ import asyncio
 import logging
 import threading
 import time
-from typing import Dict, List, Set, Generator
+from typing import Dict, List, Set, Generator, Optional
 from datetime import datetime
 from utils import safe_stop_thread
 
@@ -133,63 +133,44 @@ class TorPoolManager:
             for instance in self.instances.values():
                 yield instance.get_status()
             
-    def _create_instance(self, port: int, exit_nodes: List[str]) -> bool:
+    def _create_instance(self, port: int, exit_nodes: List[str]) -> Optional[TorProcess]:
         logger.info(f"Creating Tor process on port {port} with {len(exit_nodes)} exit nodes")
         instance = TorProcess(port=port, exit_nodes=exit_nodes)
-        
+
         if not instance.create_config(self.config_manager):
             logger.error(f"Failed to create config for port {port}")
-            return False
-            
+            return None
+
         if not instance.start_process():
             logger.error(f"Failed to start Tor process on port {port}")
             instance.cleanup()
-            return False
-            
+            return None
+
         if not self._wait_for_startup(instance):
             logger.error(f"Tor process on port {port} failed to start properly")
             instance.stop_process()
             instance.cleanup()
-            return False
-            
+            return None
+
         instance.is_running = True
         logger.info(f"Tor process started successfully on port {port}")
-        
-        with self._lock:
-            self.instances[port] = instance
-        
-        return True
+        return instance
 
-    def _wait_for_startup(self, instance, timeout: int = 60) -> bool:
-        start_time = time.time()
+    def _wait_for_startup(self, instance: TorProcess, timeout: int = 60) -> bool:
         logger.info(f"Waiting for Tor process on port {instance.port} to start up...")
-        
-        retry_count = 0
-        max_retries_per_phase = 5
-        
+        start_time = time.time()
+
         while time.time() - start_time < timeout:
             if instance.process and instance.process.poll() is not None:
                 logger.error(f"Tor process on port {instance.port} died during startup")
                 return False
-            
-            elapsed = time.time() - start_time
-            
-            if elapsed < 30:
-                if retry_count < max_retries_per_phase:
-                    if instance.test_connection():
-                        logger.info(f"Tor process on port {instance.port} is ready")
-                        return True
-                    retry_count += 1
-                    time.sleep(2)
-                else:
-                    time.sleep(3)
-                    retry_count = 0
-            else:
-                if instance.test_connection():
-                    logger.info(f"Tor process on port {instance.port} is ready")
-                    return True
-                time.sleep(4)
-            
+
+            if instance.test_connection():
+                logger.info(f"Tor process on port {instance.port} is ready")
+                return True
+
+            time.sleep(2)
+
         logger.warning(f"Tor process on port {instance.port} failed to start within {timeout}s")
         return False
 
@@ -330,14 +311,11 @@ class TorPoolManager:
             for port, instance in self.instances.items():
                 if not instance.is_running or (instance.process and instance.process.poll() is not None):
                     dead_ports.append(port)
-                    
+
         for port in dead_ports:
             logger.warning(f"Found dead instance on port {port}, removing")
             self._remove_instance(port)
-            
-        if dead_ports:
-            self._update_load_balancer()
-            
+
     def _update_stats(self):
         with self._lock:
             self.stats['total_instances'] = len(self.instances)
@@ -347,51 +325,55 @@ class TorPoolManager:
     async def _create_instances_async(self, instance_count: int, node_distributions: dict, max_concurrent: int) -> int:
         semaphore = asyncio.Semaphore(max_concurrent)
         tasks = []
-        
+
         for process_id in range(instance_count):
-            if process_id in node_distributions:
-                process_exit_nodes = node_distributions[process_id]['exit_nodes']
-                if process_exit_nodes:
-                    port = self._get_next_port()
-                    task = self._create_instance_async(semaphore, port, process_exit_nodes, process_id)
-                    tasks.append(task)
-        
+            if process_id not in node_distributions:
+                continue
+            
+            process_exit_nodes = node_distributions[process_id].get('exit_nodes')
+            if not process_exit_nodes:
+                continue
+
+            port = self._get_next_port()
+            task = self._create_instance_async(semaphore, port, process_exit_nodes)
+            tasks.append(task)
+
         if not tasks:
             return 0
-        
-        completed_count = 0
-        
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"Task {i} failed with exception: {result}")
-            elif result:
+        completed_count = 0
+        for result in results:
+            if isinstance(result, TorProcess):
+                with self._lock:
+                    self.instances[result.port] = result
                 completed_count += 1
-        
+            elif isinstance(result, Exception):
+                logger.error(f"Instance creation failed: {result}")
+
         logger.info(f"Async instance creation completed: {completed_count}/{len(tasks)} successful")
-        
-        await asyncio.sleep(2)
-        
+
         if completed_count > 0:
             self._add_all_instances_to_balancer()
-        
+
         return completed_count
-    
-    async def _create_instance_async(self, semaphore: asyncio.Semaphore, port: int, exit_nodes: List[str], process_id: int) -> bool:
+
+    async def _create_instance_async(self, semaphore: asyncio.Semaphore, port: int, exit_nodes: List[str]) -> Optional[TorProcess]:
         async with semaphore:
-            return await asyncio.get_event_loop().run_in_executor(
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
                 None, self._create_instance, port, exit_nodes
             )
-        
+
     async def _stop_instances_async(self, instances_to_stop: List[TorProcess]):
         if not instances_to_stop:
             return
             
-        tasks = []
-        for instance in instances_to_stop:
-            task = asyncio.get_event_loop().run_in_executor(None, self._stop_single_instance, instance)
-            tasks.append(task)
+        tasks = [
+            asyncio.get_event_loop().run_in_executor(None, self._stop_single_instance, instance)
+            for instance in instances_to_stop
+        ]
         
         try:
             await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=30)
