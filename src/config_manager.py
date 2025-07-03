@@ -1,9 +1,6 @@
-import logging
 import os
 from typing import Dict, List
 from utils import is_valid_ipv4
-
-logger = logging.getLogger(__name__)
 
 
 class ConfigManager:
@@ -17,24 +14,18 @@ class ConfigManager:
             raise ValueError("Exit nodes list is required for Tor configuration")
         
         config_content = self.get_tor_config_by_port(socks_port, exit_nodes)
-        
         config_path = os.path.join(self.data_dir, f'torrc.{socks_port}')
         
-        try:
-            os.makedirs(self.data_dir, exist_ok=True)
-            with open(config_path, 'w') as f:
-                f.write(config_content)
+        os.makedirs(self.data_dir, exist_ok=True)
+        with open(config_path, 'w') as f:
+            f.write(config_content)
+        os.chmod(config_path, 0o644)
 
-            os.chmod(config_path, 0o644)
-
-            return {
-                'config_path': config_path,
-                'socks_port': socks_port,
-                'exit_nodes_count': len(exit_nodes)
-            }
-        except Exception as e:
-            logger.error(f"Failed to create config file {config_path}: {e}")
-            raise
+        return {
+            'config_path': config_path,
+            'socks_port': socks_port,
+            'exit_nodes_count': len(exit_nodes)
+        }
 
     def get_tor_config_by_port(self, socks_port: int, exit_nodes: List[str]) -> str:
         if not exit_nodes:
@@ -45,7 +36,6 @@ class ConfigManager:
             raise ValueError("No valid IPv4 exit nodes provided")
         
         exit_nodes_str = ','.join(ipv4_nodes)
-        del ipv4_nodes
         
         config_lines = [
             f"SocksPort 127.0.0.1:{socks_port}",
@@ -66,6 +56,4 @@ class ConfigManager:
             "EnforceDistinctSubnets 1",
         ]
         
-        result = '\n'.join(config_lines)
-        del config_lines
-        return result
+        return '\n'.join(config_lines)
