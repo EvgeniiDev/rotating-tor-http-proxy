@@ -62,20 +62,9 @@ def main():
     
     logger.info("HTTP прокси доступен по адресу: http://localhost:8080")
     logger.info("Сервисы запущены. Нажмите Ctrl+C для остановки.")
-    
-    try:
-        while not shutdown_event.is_set():
-            stats = tor_pool.get_stats()
-            logger.debug(f"Статистика: {stats['running_instances']}/{stats['total_instances']} активных процессов")
-            time.sleep(30)
-    except KeyboardInterrupt:
-        logger.info("Получен KeyboardInterrupt. Завершение работы...")
-    finally:
-        shutdown_event.set()
-        if http_balancer:
-            http_balancer.stop()
-        if tor_pool:
-            tor_pool.stop()
+
+    while not shutdown_event.is_set():
+        time.sleep(1)
 
 if __name__ == "__main__":
     main()

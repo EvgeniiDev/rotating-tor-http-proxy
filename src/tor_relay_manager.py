@@ -13,38 +13,40 @@ class TorRelayManager:
         self.current_relays = []
         self.exit_nodes_by_probability = []
         
-    def fetch_tor_relays(self):
+    def fetch_tor_relays(self) -> Optional[Dict]:
         url = "https://onionoo.torproject.org/details?type=relay&running=true&fields=or_addresses,country,exit_probability"
-        response = requests.get(url, timeout=30)
-        return response.json()
-    
-    def extract_relay_ips(self, relay_data):
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            logger.error(f"Failed to fetch Tor relays: {e}")
+            return None
+
+    def extract_relay_ips(self, relay_data: Dict) -> List[Dict]:
         if not relay_data or 'relays' not in relay_data:
             return []
 
         exit_nodes = []
         seen_ips = set()
-        
+
         for relay in relay_data['relays']:
-            if 'or_addresses' in relay:
-                exit_prob = relay.get('exit_probability', 0)
-                
-                if isinstance(exit_prob, str):
-                    exit_prob = float(exit_prob)
+            exit_prob = relay.get('exit_probability', 0)
+            if not (isinstance(exit_prob, (int, float)) and exit_prob > 0):
+                continue
 
-                if exit_prob > 0:
-                    for addr in relay['or_addresses']:
-                        ip = addr.split(':')[0]
-                        if is_valid_ipv4(ip) and ip not in seen_ips:
-                            seen_ips.add(ip)
-                            node_info = {
-                                'ip': ip,
-                                'country': relay.get('country', 'Unknown'),
-                                'exit_probability': exit_prob
-                            }
-                            exit_nodes.append(node_info)
-                            break
-
+            for addr in relay.get('or_addresses', []):
+                ip = addr.split(':')[0]
+                if is_valid_ipv4(ip) and ip not in seen_ips:
+                    seen_ips.add(ip)
+                    node_info = {
+                        'ip': ip,
+                        'country': relay.get('country', 'Unknown'),
+                        'exit_probability': exit_prob
+                    }
+                    exit_nodes.append(node_info)
+                    break
+        
         exit_nodes.sort(key=lambda x: x['exit_probability'], reverse=True)
         
         logger.info(f"Found {len(exit_nodes)} unique IPv4 exit nodes with probability > 0")

@@ -2,10 +2,10 @@ import subprocess
 import tempfile
 import os
 import time
-import requests
 from typing import List, Optional, Dict, Set
 from datetime import datetime, timedelta
 import signal
+import requests
 
 TEST_URLS = [
     'https://httpbin.org/ip',
@@ -13,7 +13,7 @@ TEST_URLS = [
     'https://icanhazip.com'
 ]
 
-REQUEST_TIMEOUT = 30
+REQUEST_TIMEOUT = 15
 
 
 class TorProcess:
@@ -39,6 +39,18 @@ class TorProcess:
         self.blacklisted_nodes: Set[str] = set()
         self.node_usage_count: Dict[str, int] = {}
         self.inactive_threshold = timedelta(minutes=60)
+
+    def _make_request(self, url: str) -> Optional[requests.Response]:
+        try:
+            response = requests.get(
+                url,
+                proxies=self.get_proxies(),
+                timeout=REQUEST_TIMEOUT
+            )
+            response.raise_for_status()
+            return response
+        except requests.RequestException:
+            return None
 
     def create_config(self, config_manager) -> bool:
         temp_fd, self.config_file = tempfile.mkstemp(suffix='.torrc', prefix=f'tor_{self.port}_')
@@ -84,41 +96,36 @@ class TorProcess:
 
     def test_connection(self) -> bool:
         for url in TEST_URLS:
-            response = requests.get(
-                url,
-                proxies=self.get_proxies(),
-                timeout=REQUEST_TIMEOUT
-            )
-            if response.status_code == 200:
+            if self._make_request(url):
                 return True
         return False
 
     def check_health(self) -> bool:
         for url in TEST_URLS:
-            response = requests.get(
-                url,
-                proxies=self.get_proxies(),
-                timeout=REQUEST_TIMEOUT
-            )
-            
-            if response.status_code == 200:
-                if 'json' in response.headers.get('content-type', ''):
+            response = self._make_request(url)
+            if not response:
+                continue
+
+            if 'json' in response.headers.get('content-type', ''):
+                try:
                     data = response.json()
                     if 'origin' in data:
                         self.current_exit_ip = data['origin'].strip()
                     elif 'ip' in data:
                         self.current_exit_ip = data['ip'].strip()
-                else:
+                except ValueError:
                     self.current_exit_ip = response.text.strip()
-                
-                self.failed_checks = 0
-                self.last_check = datetime.now()
-                
-                if self.current_exit_ip:
-                    self.report_active_exit_node(self.current_exit_ip)
-                
-                return True
-                
+            else:
+                self.current_exit_ip = response.text.strip()
+
+            self.failed_checks = 0
+            self.last_check = datetime.now()
+
+            if self.current_exit_ip:
+                self.report_active_exit_node(self.current_exit_ip)
+
+            return True
+
         self.failed_checks += 1
         return False
 
