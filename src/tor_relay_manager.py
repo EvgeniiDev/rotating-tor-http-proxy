@@ -61,40 +61,35 @@ class TorRelayManager:
             logger.warning("No exit nodes available for distribution")
             return {}
         
-        nodes = self.exit_nodes_by_probability
-        total_nodes = len(nodes)
+        return self.distribute_exit_nodes_for_specific_instances(
+            list(range(num_processes)), self.exit_nodes_by_probability
+        )
+
+    def distribute_exit_nodes_for_specific_instances(self, process_ids: List[int], available_nodes: List[Dict]) -> Dict[int, Dict]:
+        if not available_nodes:
+            logger.warning("No available nodes for distribution")
+            return {}
+
+        num_processes = len(process_ids)
+        total_nodes = len(available_nodes)
         max_nodes_per_process = 25
-        
-        base_nodes_per_process = min(total_nodes // num_processes, max_nodes_per_process)
-        extra_nodes = total_nodes % num_processes
-        
-        process_distributions = {}
-        start_idx = 0
-        
-        for process_id in range(num_processes):
-            nodes_count = min(
-                base_nodes_per_process + (1 if process_id < extra_nodes else 0),
-                max_nodes_per_process
-            )
+
+        if total_nodes < num_processes:
+            logger.warning(f"Number of available nodes ({total_nodes}) is less than requested processes ({num_processes}). Some processes may not get nodes.")
+
+        process_distributions = {pid: {'exit_nodes': [], 'total_probability': 0.0, 'node_count': 0} for pid in process_ids}
+
+        for i in range(total_nodes):
+            process_id = process_ids[i % num_processes]
             
-            if nodes_count > 0 and start_idx < total_nodes:
-                end_idx = min(start_idx + nodes_count, total_nodes)
-                process_nodes = nodes[start_idx:end_idx]
-                process_distributions[process_id] = {
-                    'exit_nodes': [node['ip'] for node in process_nodes],
-                    'total_probability': sum(node['exit_probability'] for node in process_nodes),
-                    'node_count': len(process_nodes)
-                }
-                start_idx = end_idx
-            else:
-                process_distributions[process_id] = {
-                    'exit_nodes': [],
-                    'total_probability': 0.0,
-                    'node_count': 0
-                }
-        
+            if process_distributions[process_id]['node_count'] < max_nodes_per_process:
+                node = available_nodes[i]
+                process_distributions[process_id]['exit_nodes'].append(node['ip'])
+                process_distributions[process_id]['total_probability'] += node['exit_probability']
+                process_distributions[process_id]['node_count'] += 1
+
         total_distributed = sum(data['node_count'] for data in process_distributions.values())
-        logger.info(f"Distributed {total_distributed}/{total_nodes} nodes across {num_processes} processes (max {max_nodes_per_process} per process)")
+        logger.info(f"Distributed {total_distributed}/{total_nodes} nodes across {num_processes} specific processes (max {max_nodes_per_process} per process)")
         
         if not self.validate_distribution_uniqueness(process_distributions):
             logger.error("Distribution validation failed - duplicate IPs detected")
