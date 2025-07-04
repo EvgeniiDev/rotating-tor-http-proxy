@@ -42,57 +42,162 @@ class TorPoolManager:
         self.global_suspicious_nodes: Set[str] = set()
         self.global_blacklisted_nodes: Set[str] = set()
         
-    def start(self, instance_count: int, max_concurrent: int = 5) -> bool:
+    def start(self, instance_count: int, max_concurrent: int = 5, max_retries: int = 3) -> bool:
         with self._lock:
             if self.running:
                 return True
-                
-            relay_data = self.relay_manager.fetch_tor_relays()
-            if not relay_data:
-                logger.error("Failed to fetch Tor relay data")
-                return False
-                
-            exit_nodes = self.relay_manager.extract_relay_ips(relay_data)
-            if not exit_nodes:
-                logger.error("No exit nodes extracted from relay data")
-                return False
-                
-            logger.info(f"Found {len(exit_nodes)} exit nodes")
+
+        relay_data = self.relay_manager.fetch_tor_relays()
+        if not relay_data:
+            logger.error("Failed to fetch Tor relay data")
+            return False
+
+        exit_nodes = self.relay_manager.extract_relay_ips(relay_data)
+        if not exit_nodes:
+            logger.error("No exit nodes extracted from relay data")
+            return False
+        logger.info(f"Found {len(exit_nodes)} exit nodes")
+
+        all_nodes = list(self.relay_manager.exit_nodes_by_probability)
+        used_nodes = set()
+
+        def get_node_distributions(count, nodes_to_distribute):
+            available_nodes = [n for n in nodes_to_distribute if n['ip'] not in used_nodes]
+            logger.info(f"Distributing {len(available_nodes)} available nodes for {count} instances.")
             
-            node_distributions = self.relay_manager.distribute_exit_nodes(instance_count)
-            if not node_distributions:
-                logger.error("Failed to distribute exit nodes across instances")
-                return False
-                
-            processes_with_nodes = sum(1 for d in node_distributions.values() if d.get('exit_nodes'))
-            logger.info(f"Created node distributions for {processes_with_nodes}/{instance_count} processes")
-            
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            completed_count = loop.run_until_complete(
-                self._create_instances_async(instance_count, node_distributions, max_concurrent)
+            if not available_nodes:
+                logger.warning("No more available nodes to distribute.")
+                return {}
+
+            distributions = self.relay_manager.distribute_exit_nodes_for_specific_instances(
+                list(range(count)), available_nodes
             )
-        finally:
-            loop.close()
             
-        with self._lock:
-            final_count = len(self.instances)
-            balancer_count = len(self.added_to_balancer)
-            
-        logger.info(f"Created {final_count} out of {instance_count} requested Tor instances")
-        
-        if final_count == 0:
+            for dist_data in distributions.values():
+                for ip in dist_data.get('exit_nodes', []):
+                    used_nodes.add(ip)
+            return distributions
+
+        # Initial attempt
+        node_distributions = get_node_distributions(instance_count, all_nodes)
+        if not node_distributions:
+            logger.error("Failed to create initial node distribution.")
             return False
             
+        processes_with_nodes = sum(1 for d in node_distributions.values() if d.get('exit_nodes'))
+        logger.info(f"Created initial node distributions for {processes_with_nodes}/{instance_count} processes")
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            failed_ids = loop.run_until_complete(
+                self._create_instances_async(node_distributions, max_concurrent)
+            )
+
+            # Retry logic
+            for attempt in range(max_retries):
+                if not failed_ids:
+                    break
+                
+                logger.info(f"Retry attempt {attempt + 1}/{max_retries} for {len(failed_ids)} failed instances.")
+                
+                retry_distributions = get_node_distributions(len(failed_ids), all_nodes)
+                
+                if not retry_distributions:
+                    logger.warning("No nodes available for retry, stopping.")
+                    break
+
+                # Map new distributions to original failed IDs
+                mapped_retry_distributions = {
+                    original_id: retry_distributions[i]
+                    for i, original_id in enumerate(failed_ids)
+                }
+
+                failed_ids = loop.run_until_complete(
+                    self._create_instances_async(mapped_retry_distributions, max_concurrent)
+                )
+
+        finally:
+            loop.close()
+
         with self._lock:
+            final_count = len(self.instances)
+            if final_count == 0:
+                logger.error("No instances could be started.")
+                return False
+
             self.running = True
-            
-        self._start_cleanup_thread()
-        self._update_stats()
-        logger.info(f"Pool started successfully with {final_count} instances")
+            self._start_cleanup_thread()
+            self._update_stats()
+
+        logger.info(f"Pool started successfully with {final_count}/{instance_count} instances.")
         return True
+
+    async def _create_instances_async(
+        self, 
+        node_distributions: Dict[int, Dict], 
+        max_concurrent: int
+    ) -> List[int]:
+        if not node_distributions:
+            return []
+
+        semaphore = asyncio.Semaphore(max_concurrent)
+        tasks = []
+        
+        for process_id, dist_data in node_distributions.items():
+            exit_nodes = dist_data.get('exit_nodes', [])
+            if not exit_nodes:
+                logger.warning(f"Skipping instance {process_id} due to no assigned exit nodes.")
+                continue
             
+            task = self._create_single_instance(semaphore, process_id, exit_nodes)
+            tasks.append(task)
+            
+        results = await asyncio.gather(*tasks)
+        
+        failed_ids = [result for result in results if result is not None]
+        
+        successful_count = len(node_distributions) - len(failed_ids)
+        logger.info(f"Async instance creation completed: {successful_count}/{len(node_distributions)} successful")
+        
+        return failed_ids
+
+    async def _create_single_instance(self, semaphore: asyncio.Semaphore, process_id: int, exit_nodes: List[str]) -> Optional[int]:
+        async with semaphore:
+            port = self.next_port
+            self.next_port += 1
+            
+            logger.info(f"Creating Tor process {process_id} on port {port} with {len(exit_nodes)} exit nodes")
+            
+            instance = TorProcess(
+                port=port,
+                exit_nodes=exit_nodes
+            )
+
+            if not instance.create_config(self.config_manager):
+                logger.error(f"Tor process on port {port} failed to create config")
+                return process_id
+                
+            if not instance.start_process():
+                logger.error(f"Tor process on port {port} failed to start")
+                return process_id
+                
+            if not self._wait_for_startup(instance):
+                logger.error(f"Tor process on port {port} failed to start properly")
+                instance.stop_process()
+                instance.cleanup()
+                return process_id
+
+            instance.is_running = True
+
+            logger.info(f"Tor process on port {port} started successfully")
+            with self._lock:
+                self.instances[port] = instance
+                self.load_balancer.add_proxy(port)
+                self.added_to_balancer.add(port)
+            return None
+
     def stop(self):
         with self._lock:
             if not self.running:
@@ -120,6 +225,15 @@ class TorPoolManager:
             self.global_blacklisted_nodes.clear()
             
         self._update_stats()
+
+    async def _stop_instances_async(self, instances_to_stop: List[TorProcess]):
+        if not instances_to_stop:
+            return
+        logger.info(f"Stopping {len(instances_to_stop)} Tor instances...")
+        for instance in instances_to_stop:
+            instance.stop_process()
+            instance.cleanup()
+        logger.info("All specified Tor instances have been stopped.")
 
     def get_stats(self) -> dict:
         with self._lock:
@@ -321,64 +435,6 @@ class TorPoolManager:
             self.stats['total_instances'] = len(self.instances)
             self.stats['running_instances'] = sum(1 for instance in self.instances.values() if instance.is_running)
             self.stats['last_update'] = datetime.now()
-            
-    async def _create_instances_async(self, instance_count: int, node_distributions: dict, max_concurrent: int) -> int:
-        semaphore = asyncio.Semaphore(max_concurrent)
-        tasks = []
-
-        for process_id in range(instance_count):
-            if process_id not in node_distributions:
-                continue
-            
-            process_exit_nodes = node_distributions[process_id].get('exit_nodes')
-            if not process_exit_nodes:
-                continue
-
-            port = self._get_next_port()
-            task = self._create_instance_async(semaphore, port, process_exit_nodes)
-            tasks.append(task)
-
-        if not tasks:
-            return 0
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        completed_count = 0
-        for result in results:
-            if isinstance(result, TorProcess):
-                with self._lock:
-                    self.instances[result.port] = result
-                completed_count += 1
-            elif isinstance(result, Exception):
-                logger.error(f"Instance creation failed: {result}")
-
-        logger.info(f"Async instance creation completed: {completed_count}/{len(tasks)} successful")
-
-        if completed_count > 0:
-            self._add_all_instances_to_balancer()
-
-        return completed_count
-
-    async def _create_instance_async(self, semaphore: asyncio.Semaphore, port: int, exit_nodes: List[str]) -> Optional[TorProcess]:
-        async with semaphore:
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(
-                None, self._create_instance, port, exit_nodes
-            )
-
-    async def _stop_instances_async(self, instances_to_stop: List[TorProcess]):
-        if not instances_to_stop:
-            return
-            
-        tasks = [
-            asyncio.get_event_loop().run_in_executor(None, self._stop_single_instance, instance)
-            for instance in instances_to_stop
-        ]
-        
-        try:
-            await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=30)
-        except asyncio.TimeoutError:
-            logger.warning("Timeout while stopping instances")
 
     def _stop_single_instance(self, instance):
         instance.is_running = False
