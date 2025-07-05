@@ -40,8 +40,6 @@ class ConfigManager:
         config_lines = [
             f"SocksPort 127.0.0.1:{socks_port}",
             f"DataDirectory {self.data_dir}/data_{socks_port}",
-            "GeoIPFile /usr/share/tor/geoip",
-            "GeoIPv6File /usr/share/tor/geoip6",
             "MaxCircuitDirtiness 10",
             "NewCircuitPeriod 10",
             "ExitRelay 0",
