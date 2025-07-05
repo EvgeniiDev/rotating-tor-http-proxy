@@ -23,7 +23,7 @@ class ExitNodeTester:
         self.test_url = "https://steamcommunity.com/market/search?appid=730"
         self.required_success_count = 4  # Минимум 4 успешных ответа из 6
         self.test_requests_count = 6     # Количество тестовых запросов
-        self.max_workers = 10            # Количество потоков для тестирования
+        self.max_workers = 20            # Увеличиваем количество потоков для большей производительности
         self.timeout = 30                # Таймаут для HTTP-запросов в секундах
         
     def test_exit_nodes(self, exit_nodes: List[str]) -> List[str]:
@@ -101,9 +101,13 @@ class ExitNodeTester:
         """
         working_nodes = []
         lock = threading.Lock()
+        total_nodes = len(exit_nodes)
+        tested_count = 0
+        progress_lock = threading.Lock()
         
         def test_single_node(node_ip: str) -> Optional[str]:
             """Тестирует один узел"""
+            nonlocal tested_count
             try:
                 success_count = 0
                 
@@ -137,13 +141,25 @@ class ExitNodeTester:
                 # Проверяем результат
                 if success_count >= self.required_success_count:
                     logger.info(f"Node {node_ip} passed test: {success_count}/{self.test_requests_count} successful requests")
-                    return node_ip
+                    result = node_ip
                 else:
                     logger.info(f"Node {node_ip} failed test: {success_count}/{self.test_requests_count} successful requests")
-                    return None
+                    result = None
+                
+                # Обновляем прогресс
+                with progress_lock:
+                    tested_count += 1
+                    progress = (tested_count / total_nodes) * 100
+                    if tested_count % 10 == 0 or tested_count == total_nodes:  # Показываем каждые 10 узлов или последний
+                        logger.info(f"Testing progress: {tested_count}/{total_nodes} nodes tested ({progress:.1f}%)")
+                
+                return result
                     
             except Exception as e:
                 logger.error(f"Error testing node {node_ip}: {e}")
+                # Обновляем прогресс даже при ошибке
+                with progress_lock:
+                    tested_count += 1
                 return None
         
         # Запускаем тестирование в пуле потоков
