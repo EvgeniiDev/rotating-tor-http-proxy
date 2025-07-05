@@ -7,8 +7,8 @@ from typing import List, Dict, Set, Optional
 import requests
 from datetime import datetime
 
-from .tor_process import TorProcess
-from .config_manager import ConfigManager
+from tor_process import TorProcess
+from config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
