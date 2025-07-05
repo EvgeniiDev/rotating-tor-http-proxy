@@ -66,13 +66,18 @@ class TorPoolManager:
         if test_nodes:
             logger.info("Testing exit nodes before distribution...")
             all_node_ips = [node['ip'] for node in exit_nodes]
-            working_nodes = self.test_exit_nodes(all_node_ips)
+            
+            # Тестируем все доступные узлы
+            test_node_ips = all_node_ips
+            
+            logger.info(f"Testing all {len(test_node_ips)} nodes")
+            working_nodes = self.test_exit_nodes(test_node_ips)
             
             if not working_nodes:
                 logger.error("No working exit nodes found after testing")
                 return False
                 
-            logger.info(f"Node testing completed: {len(working_nodes)}/{len(all_node_ips)} nodes passed the test")
+            logger.info(f"Node testing completed: {len(working_nodes)}/{len(test_node_ips)} nodes passed the test")
             
             # Создаем новый список узлов только с рабочими
             working_node_data = [node for node in exit_nodes if node['ip'] in working_nodes]
