@@ -50,7 +50,7 @@ class ConfigManager:
             "UseMicrodescriptors 1",
             "AvoidDiskWrites 1",
             f"ExitNodes {exit_nodes_str}",
-            "StrictNodes 0",
+            "StrictNodes 1", # disallow to use other exit nodes. I think it doesn't work
             "EnforceDistinctSubnets 0", # allow to use exit ip from same subnet (/16)
         ]
         
