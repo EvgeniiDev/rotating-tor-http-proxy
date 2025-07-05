@@ -23,7 +23,7 @@ class TorRelayManager:
             logger.error(f"Failed to fetch Tor relays: {e}")
             return None
 
-    def extract_relay_ips(self, relay_data: Dict) -> List[Dict]:
+    def extract_relay_ips(self, relay_data: Dict, skip_top_nodes: int = 200) -> List[Dict]:
         if not relay_data or 'relays' not in relay_data:
             return []
 
@@ -49,12 +49,27 @@ class TorRelayManager:
         
         exit_nodes.sort(key=lambda x: x['exit_probability'], reverse=True)
         
-        logger.info(f"Found {len(exit_nodes)} unique IPv4 exit nodes with probability > 0")
-        
-        self.current_relays = exit_nodes
-        self.exit_nodes_by_probability = exit_nodes
-        
-        return exit_nodes
+        # Пропускаем первые N узлов с наивысшей вероятностью
+        if skip_top_nodes > 0 and len(exit_nodes) > skip_top_nodes:
+            skipped_nodes = exit_nodes[:skip_top_nodes]
+            selected_nodes = exit_nodes[skip_top_nodes:]
+            
+            logger.info(f"Found {len(exit_nodes)} unique IPv4 exit nodes with probability > 0")
+            logger.info(f"Skipping top {skip_top_nodes} nodes with highest probability (range: {skipped_nodes[0]['exit_probability']:.4f} - {skipped_nodes[-1]['exit_probability']:.4f})")
+            logger.info(f"Using {len(selected_nodes)} nodes (range: {selected_nodes[0]['exit_probability']:.4f} - {selected_nodes[-1]['exit_probability']:.4f})")
+            
+            self.current_relays = selected_nodes
+            self.exit_nodes_by_probability = selected_nodes
+            
+            return selected_nodes
+        else:
+            logger.info(f"Found {len(exit_nodes)} unique IPv4 exit nodes with probability > 0")
+            logger.info(f"Not enough nodes to skip top {skip_top_nodes}, using all available nodes")
+            
+            self.current_relays = exit_nodes
+            self.exit_nodes_by_probability = exit_nodes
+            
+            return exit_nodes
     
     def distribute_exit_nodes(self, num_processes: int) -> Dict[int, List[str]]:
         if not self.exit_nodes_by_probability:
