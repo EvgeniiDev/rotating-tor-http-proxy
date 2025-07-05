@@ -42,7 +42,7 @@ class TorPoolManager:
         self.global_suspicious_nodes: Set[str] = set()
         self.global_blacklisted_nodes: Set[str] = set()
         
-    def start(self, instance_count: int, max_concurrent: int = 5, max_retries: int = 3) -> bool:
+    def start(self, instance_count: int, max_concurrent: int = 10, max_retries: int = 3) -> bool:
         with self._lock:
             if self.running:
                 return True
@@ -142,6 +142,7 @@ class TorPoolManager:
         if not node_distributions:
             return []
 
+        logger.info(f"Starting parallel creation of {len(node_distributions)} Tor instances with max_concurrent={max_concurrent}")
         semaphore = asyncio.Semaphore(max_concurrent)
         tasks = []
         
@@ -154,12 +155,13 @@ class TorPoolManager:
             task = self._create_single_instance(semaphore, process_id, exit_nodes)
             tasks.append(task)
             
+        logger.info(f"Created {len(tasks)} tasks for parallel execution")
         results = await asyncio.gather(*tasks)
         
         failed_ids = [result for result in results if result is not None]
         
         successful_count = len(node_distributions) - len(failed_ids)
-        logger.info(f"Async instance creation completed: {successful_count}/{len(node_distributions)} successful")
+        logger.info(f"Parallel instance creation completed: {successful_count}/{len(node_distributions)} successful, {len(failed_ids)} failed")
         
         return failed_ids
 
@@ -168,7 +170,7 @@ class TorPoolManager:
             port = self.next_port
             self.next_port += 1
             
-            logger.info(f"Creating Tor process {process_id} on port {port} with {len(exit_nodes)} exit nodes")
+            logger.info(f"[{process_id}] Starting creation of Tor process on port {port} with {len(exit_nodes)} exit nodes")
             
             instance = TorProcess(
                 port=port,
@@ -176,22 +178,22 @@ class TorPoolManager:
             )
 
             if not instance.create_config(self.config_manager):
-                logger.error(f"Tor process on port {port} failed to create config")
+                logger.error(f"[{process_id}] Tor process on port {port} failed to create config")
                 return process_id
                 
             if not instance.start_process():
-                logger.error(f"Tor process on port {port} failed to start")
+                logger.error(f"[{process_id}] Tor process on port {port} failed to start")
                 return process_id
                 
-            if not self._wait_for_startup(instance):
-                logger.error(f"Tor process on port {port} failed to start properly")
+            if not await self._wait_for_startup_async(instance):
+                logger.error(f"[{process_id}] Tor process on port {port} failed to start properly")
                 instance.stop_process()
                 instance.cleanup()
                 return process_id
 
             instance.is_running = True
 
-            logger.info(f"Tor process on port {port} started successfully")
+            logger.info(f"[{process_id}] Tor process on port {port} started successfully")
             with self._lock:
                 self.instances[port] = instance
                 self.load_balancer.add_proxy(port)
@@ -206,7 +208,8 @@ class TorPoolManager:
             self.running = False
             self._shutdown_event.set()
             
-            safe_stop_thread(self._cleanup_thread)
+            if self._cleanup_thread:
+                safe_stop_thread(self._cleanup_thread)
                 
             instances_to_stop = list(self.instances.values())
             
@@ -284,6 +287,24 @@ class TorPoolManager:
                 return True
 
             time.sleep(2)
+
+        logger.warning(f"Tor process on port {instance.port} failed to start within {timeout}s")
+        return False
+
+    async def _wait_for_startup_async(self, instance: TorProcess, timeout: int = 60) -> bool:
+        logger.info(f"Waiting for Tor process on port {instance.port} to start up...")
+        start_time = time.time()
+
+        while time.time() - start_time < timeout:
+            if instance.process and instance.process.poll() is not None:
+                logger.error(f"Tor process on port {instance.port} died during startup")
+                return False
+
+            if instance.test_connection():
+                logger.info(f"Tor process on port {instance.port} is ready")
+                return True
+
+            await asyncio.sleep(2)
 
         logger.warning(f"Tor process on port {instance.port} failed to start within {timeout}s")
         return False

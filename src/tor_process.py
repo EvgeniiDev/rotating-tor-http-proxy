@@ -13,7 +13,7 @@ TEST_URLS = [
     'https://icanhazip.com'
 ]
 
-REQUEST_TIMEOUT = 15
+REQUEST_TIMEOUT = 30
 
 
 class TorProcess:
@@ -67,12 +67,20 @@ class TorProcess:
     def start_process(self) -> bool:
         cmd = ['tor', '-f', self.config_file]
         
-        self.process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            preexec_fn=os.setsid
-        )
+        # Используем preexec_fn только на Unix-системах
+        if hasattr(os, 'setsid'):
+            self.process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                preexec_fn=os.setsid
+            )
+        else:
+            self.process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
         
         return True
 
