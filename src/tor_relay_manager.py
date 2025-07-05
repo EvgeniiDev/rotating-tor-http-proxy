@@ -63,6 +63,9 @@ class TorRelayManager:
                     })
                     break
 
+        # Сортируем ноды по вероятности выхода (от высокой к низкой)
+        exit_nodes.sort(key=lambda x: x['exit_probability'], reverse=True)
+        
         logger.info(f"Found {len(exit_nodes)} qualified exit nodes after filtering")
 
         self.current_relays = exit_nodes
@@ -86,12 +89,27 @@ class TorRelayManager:
         max_nodes_per_process = 25
         process_distributions = {pid: {'exit_nodes': [], 'total_probability': 0.0, 'node_count': 0} for pid in process_ids}
 
-        for i, node in enumerate(available_nodes):
-            process_id = process_ids[i % num_processes]
-            if process_distributions[process_id]['node_count'] < max_nodes_per_process:
-                process_distributions[process_id]['exit_nodes'].append(node['ip'])
-                process_distributions[process_id]['total_probability'] += node['exit_probability']
-                process_distributions[process_id]['node_count'] += 1
+        # Разделяем ноды на равные группы по вероятности
+        nodes_per_process = len(available_nodes) // num_processes
+        remainder = len(available_nodes) % num_processes
+
+        start_idx = 0
+        for i, process_id in enumerate(process_ids):
+            # Определяем количество нод для текущего процесса
+            current_nodes_count = nodes_per_process + (1 if i < remainder else 0)
+            
+            # Берем ноды для текущего процесса
+            end_idx = start_idx + current_nodes_count
+            process_nodes = available_nodes[start_idx:end_idx]
+            
+            # Добавляем ноды в процесс (с учетом лимита max_nodes_per_process)
+            for node in process_nodes:
+                if process_distributions[process_id]['node_count'] < max_nodes_per_process:
+                    process_distributions[process_id]['exit_nodes'].append(node['ip'])
+                    process_distributions[process_id]['total_probability'] += node['exit_probability']
+                    process_distributions[process_id]['node_count'] += 1
+            
+            start_idx = end_idx
 
         total_distributed = sum(data['node_count'] for data in process_distributions.values())
         logger.info(f"Distributed {total_distributed} nodes across {num_processes} processes")
