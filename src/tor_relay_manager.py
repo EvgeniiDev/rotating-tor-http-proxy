@@ -15,7 +15,7 @@ class TorRelayManager:
     def fetch_tor_relays(self) -> Optional[Dict]:
         url = (
             "https://onionoo.torproject.org/details?type=relay&running=true&fields="
-            "or_addresses,country,exit_probability,exit_policy_summary,last_seen,uptime,flags"
+            "or_addresses,country,exit_probability,exit_policy_summary,last_seen,uptime,flags,observed_bandwidth"
         )
         try:
             response = requests.get(url, timeout=30)
@@ -56,6 +56,7 @@ class TorRelayManager:
                         'ip': ip,
                         'country': relay.get('country', 'Unknown'),
                         'exit_probability': exit_prob,
+                        'observed_bandwidth': relay.get('observed_bandwidth', 0),
                         'flags': flags,
                         'uptime': relay.get('uptime', 0),
                         'last_seen': relay.get('last_seen', ''),
@@ -63,8 +64,8 @@ class TorRelayManager:
                     })
                     break
 
-        # Сортируем ноды по вероятности выхода (от высокой к низкой)
-        exit_nodes.sort(key=lambda x: x['exit_probability'], reverse=True)
+        # Сортируем ноды по пропускной способности (от высокой к низкой)
+        exit_nodes.sort(key=lambda x: x['observed_bandwidth'], reverse=True)
         
         logger.info(f"Found {len(exit_nodes)} qualified exit nodes after filtering")
 
