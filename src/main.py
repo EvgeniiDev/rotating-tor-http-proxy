@@ -56,7 +56,7 @@ def main():
         relay_manager=relay_manager
     )
     
-    if not tor_pool.start(tor_processes, skip_top_nodes=200):
+    if not tor_pool.start(tor_processes):
         logger.error("Не удалось запустить пул Tor процессов")
         sys.exit(1)
     

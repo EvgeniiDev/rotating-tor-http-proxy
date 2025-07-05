@@ -42,7 +42,7 @@ class TorPoolManager:
         self.global_suspicious_nodes: Set[str] = set()
         self.global_blacklisted_nodes: Set[str] = set()
         
-    def start(self, instance_count: int, max_concurrent: int = 10, max_retries: int = 3, skip_top_nodes: int = 200) -> bool:
+    def start(self, instance_count: int, max_concurrent: int = 10, max_retries: int = 3) -> bool:
         with self._lock:
             if self.running:
                 return True
@@ -52,7 +52,7 @@ class TorPoolManager:
             logger.error("Failed to fetch Tor relay data")
             return False
 
-        exit_nodes = self.relay_manager.extract_relay_ips(relay_data, skip_top_nodes)
+        exit_nodes = self.relay_manager.extract_relay_ips(relay_data)
         if not exit_nodes:
             logger.error("No exit nodes extracted from relay data")
             return False
