@@ -39,21 +39,19 @@ class ConfigManager:
         
         config_lines = [
             f"SocksPort 127.0.0.1:{socks_port}",
-            "RunAsDaemon 0",
             f"DataDirectory {self.data_dir}/data_{socks_port}",
             "GeoIPFile /usr/share/tor/geoip",
             "GeoIPv6File /usr/share/tor/geoip6",
             "MaxCircuitDirtiness 10",
             "NewCircuitPeriod 10",
-            "CircuitBuildTimeout 15",
             "ExitRelay 0",
-            "RefuseUnknownExits 0",
+            "RefuseUnknownExits 0", # allow use unknown nodes as exit
             "ClientOnly 1",
             "UseMicrodescriptors 1",
             "AvoidDiskWrites 1",
             f"ExitNodes {exit_nodes_str}",
             "StrictNodes 0",
-            "EnforceDistinctSubnets 1",
+            "EnforceDistinctSubnets 0", # allow to use exit ip from same subnet (/16)
         ]
         
         return '\n'.join(config_lines)
