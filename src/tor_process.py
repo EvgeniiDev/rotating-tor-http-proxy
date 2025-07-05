@@ -67,22 +67,26 @@ class TorProcess:
     def start_process(self) -> bool:
         cmd = ['tor', '-f', self.config_file]
         
-        # Используем preexec_fn только на Unix-системах
-        if hasattr(os, 'setsid'):
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                preexec_fn=os.setsid
-            )
-        else:
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-        
-        return True
+        try:
+            # Используем preexec_fn только на Unix-системах
+            if hasattr(os, 'setsid'):
+                self.process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    preexec_fn=os.setsid
+                )
+            else:
+                self.process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+            
+            self.is_running = True
+            return True
+        except Exception:
+            return False
 
     def stop_process(self):
         if self.process:
@@ -96,6 +100,7 @@ class TorProcess:
                     self.process.wait()
                     
             self.process = None
+            self.is_running = False
 
     def cleanup(self):
         if self.config_file and os.path.exists(self.config_file):
@@ -144,18 +149,26 @@ class TorProcess:
         }
 
     def reload_exit_nodes(self, new_exit_nodes: List[str], config_manager) -> bool:
-        if not self.is_running or not self.process:
+        if not self.process or self.process.poll() is not None:
             return False
         
-        self.exit_nodes = new_exit_nodes
-        config_content = config_manager.get_tor_config_by_port(
-            self.port,
-            self.exit_nodes
-        )
-        with open(self.config_file, 'w') as f:
-            f.write(config_content)
-        os.killpg(os.getpgid(self.process.pid), signal.SIGHUP)
-        return True
+        try:
+            self.exit_nodes = new_exit_nodes
+            config_content = config_manager.get_tor_config_by_port(
+                self.port,
+                self.exit_nodes
+            )
+            with open(self.config_file, 'w') as f:
+                f.write(config_content)
+            
+            if hasattr(os, 'setsid'):
+                os.killpg(os.getpgid(self.process.pid), signal.SIGHUP)
+            else:
+                self.process.send_signal(signal.SIGHUP)
+                
+            return True
+        except (OSError, ProcessLookupError, PermissionError) as e:
+            return False
 
     def report_active_exit_node(self, ip: str):
         self.exit_node_activity[ip] = datetime.now()

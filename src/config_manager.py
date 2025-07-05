@@ -1,6 +1,6 @@
 import os
 from typing import Dict, List
-from utils import is_valid_ipv4
+from .utils import is_valid_ipv4
 
 
 class ConfigManager:
