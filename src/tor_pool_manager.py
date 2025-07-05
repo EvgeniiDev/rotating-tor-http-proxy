@@ -7,13 +7,14 @@ from datetime import datetime
 from utils import safe_stop_thread
 
 from tor_process import TorProcess
+from exit_node_tester import ExitNodeTester
 
 logger = logging.getLogger(__name__)
 
 
 class TorPoolManager:
     __slots__ = (
-        'config_manager', 'load_balancer', 'relay_manager', 'instances',
+        'config_manager', 'load_balancer', 'relay_manager', 'exit_node_tester', 'instances',
         'added_to_balancer', 'next_port', 'running', '_lock', '_cleanup_thread',
         '_shutdown_event', 'stats', 'global_suspicious_nodes', 
         'global_blacklisted_nodes'
@@ -23,6 +24,9 @@ class TorPoolManager:
         self.config_manager = config_manager
         self.load_balancer = load_balancer
         self.relay_manager = relay_manager
+        
+        # Инициализируем тестер выходных узлов
+        self.exit_node_tester = ExitNodeTester(config_manager)
         
         self.instances: Dict[int, TorProcess] = {}
         self.added_to_balancer: set = set()
@@ -42,7 +46,7 @@ class TorPoolManager:
         self.global_suspicious_nodes: Set[str] = set()
         self.global_blacklisted_nodes: Set[str] = set()
         
-    def start(self, instance_count: int, max_concurrent: int = 10, max_retries: int = 3) -> bool:
+    def start(self, instance_count: int, max_concurrent: int = 10, max_retries: int = 3, test_nodes: bool = True) -> bool:
         with self._lock:
             if self.running:
                 return True
@@ -58,6 +62,27 @@ class TorPoolManager:
             return False
         logger.info(f"Found {len(exit_nodes)} exit nodes")
 
+        # Тестируем все узлы перед распределением (если включено)
+        if test_nodes:
+            logger.info("Testing exit nodes before distribution...")
+            all_node_ips = [node['ip'] for node in exit_nodes]
+            working_nodes = self.test_exit_nodes(all_node_ips)
+            
+            if not working_nodes:
+                logger.error("No working exit nodes found after testing")
+                return False
+                
+            logger.info(f"Node testing completed: {len(working_nodes)}/{len(all_node_ips)} nodes passed the test")
+            
+            # Создаем новый список узлов только с рабочими
+            working_node_data = [node for node in exit_nodes if node['ip'] in working_nodes]
+            
+            # Обновляем список узлов в relay_manager
+            self.relay_manager.exit_nodes_by_probability = working_node_data
+        else:
+            logger.info("Skipping node testing (disabled)")
+            working_nodes = [node['ip'] for node in exit_nodes]
+        
         all_nodes = list(self.relay_manager.exit_nodes_by_probability)
         used_nodes = set()
 
@@ -101,6 +126,21 @@ class TorPoolManager:
                     break
                 
                 logger.info(f"Retry attempt {attempt + 1}/{max_retries} for {len(failed_ids)} failed instances.")
+                
+                # При повторных попытках также тестируем узлы
+                if attempt > 0:
+                    logger.info("Re-testing nodes for retry attempt...")
+                    retry_node_ips = [node['ip'] for node in all_nodes if node['ip'] not in used_nodes]
+                    if retry_node_ips:
+                        retry_working_nodes = self.test_exit_nodes(retry_node_ips)
+                        if retry_working_nodes:
+                            # Обновляем список доступных узлов
+                            retry_node_data = [node for node in all_nodes if node['ip'] in retry_working_nodes]
+                            all_nodes = retry_node_data
+                            logger.info(f"Retry testing completed: {len(retry_working_nodes)}/{len(retry_node_ips)} nodes passed")
+                        else:
+                            logger.warning("No working nodes found for retry")
+                            break
                 
                 retry_distributions = get_node_distributions(len(failed_ids), all_nodes)
                 
@@ -554,9 +594,20 @@ class TorPoolManager:
                                         and node['ip'] not in self.global_suspicious_nodes]
                         
                         if len(filtered_nodes) > len(instance.exit_nodes):
-                            if instance.reload_exit_nodes(filtered_nodes[:len(instance.exit_nodes)], self.config_manager):
-                                redistributed_count += 1
-                                logger.info(f"Redistributed nodes for instance {port}")
+                            # Тестируем новые узлы перед распределением
+                            logger.info(f"Testing {len(filtered_nodes)} candidate nodes for instance {port}")
+                            tested_nodes = self.test_exit_nodes(filtered_nodes[:len(instance.exit_nodes) * 2])  # Тестируем в 2 раза больше
+                            
+                            if tested_nodes:
+                                # Берем нужное количество протестированных узлов
+                                nodes_to_use = tested_nodes[:len(instance.exit_nodes)]
+                                if instance.reload_exit_nodes(nodes_to_use, self.config_manager):
+                                    redistributed_count += 1
+                                    logger.info(f"Redistributed {len(nodes_to_use)} tested nodes for instance {port}")
+                                else:
+                                    logger.error(f"Failed to reload tested nodes for instance {port}")
+                            else:
+                                logger.warning(f"No working nodes found for instance {port} redistribution")
             
             if redistributed_count > 0:
                 logger.info(f"Completed redistribution for {redistributed_count} instances")
@@ -576,3 +627,110 @@ class TorPoolManager:
             
             logger.info(f"Added {added_count} instances to load balancer")
             logger.info(f"Status: {total_running} total running, {len(self.added_to_balancer)} in balancer")
+
+    def test_exit_nodes(self, exit_nodes: List[str]) -> List[str]:
+        """
+        Тестирует выходные узлы и возвращает только рабочие.
+        
+        Args:
+            exit_nodes: Список IP-адресов узлов для тестирования
+            
+        Returns:
+            Список рабочих узлов
+        """
+        logger.info(f"Starting exit node testing for {len(exit_nodes)} nodes")
+        working_nodes = self.exit_node_tester.test_and_filter_nodes(exit_nodes)
+        logger.info(f"Exit node testing completed: {len(working_nodes)}/{len(exit_nodes)} nodes passed")
+        return working_nodes
+    
+    def test_and_update_instance_nodes(self, port: int) -> bool:
+        """
+        Тестирует узлы конкретного экземпляра и обновляет их при необходимости.
+        
+        Args:
+            port: Порт экземпляра для тестирования
+            
+        Returns:
+            True если узлы были успешно обновлены
+        """
+        with self._lock:
+            if port not in self.instances:
+                logger.error(f"Instance on port {port} not found")
+                return False
+                
+            instance = self.instances[port]
+            if not instance.is_running:
+                logger.error(f"Instance on port {port} is not running")
+                return False
+            
+            current_nodes = instance.exit_nodes.copy()
+            logger.info(f"Testing {len(current_nodes)} nodes for instance on port {port}")
+            
+            # Тестируем текущие узлы
+            working_nodes = self.test_exit_nodes(current_nodes)
+            
+            # Если меньше 50% узлов работают, получаем новые
+            if len(working_nodes) < len(current_nodes) * 0.5:
+                logger.warning(f"Instance {port} has low working nodes ratio: {len(working_nodes)}/{len(current_nodes)}")
+                
+                # Получаем новые узлы
+                relay_data = self.relay_manager.fetch_tor_relays()
+                if relay_data:
+                    new_exit_nodes = self.relay_manager.extract_relay_ips(relay_data)
+                    if new_exit_nodes:
+                        # Фильтруем узлы, исключая глобально заблокированные
+                        filtered_nodes = [node['ip'] for node in new_exit_nodes 
+                                        if node['ip'] not in self.global_blacklisted_nodes 
+                                        and node['ip'] not in self.global_suspicious_nodes]
+                        
+                        # Тестируем новые узлы
+                        tested_nodes = self.test_exit_nodes(filtered_nodes[:len(current_nodes)])
+                        
+                        if tested_nodes:
+                            # Обновляем узлы через reload_exit_nodes
+                            if instance.reload_exit_nodes(tested_nodes, self.config_manager):
+                                logger.info(f"Successfully updated nodes for instance {port}: {len(tested_nodes)} working nodes")
+                                return True
+                            else:
+                                logger.error(f"Failed to reload exit nodes for instance {port}")
+                        else:
+                            logger.error(f"No working nodes found for instance {port}")
+                    else:
+                        logger.error(f"Failed to extract relay IPs for instance {port}")
+                else:
+                    logger.error(f"Failed to fetch relay data for instance {port}")
+            else:
+                logger.info(f"Instance {port} has sufficient working nodes: {len(working_nodes)}/{len(current_nodes)}")
+                
+        return False
+    
+    def test_all_instances_nodes(self) -> Dict[int, bool]:
+        """
+        Тестирует узлы всех экземпляров и обновляет их при необходимости.
+        
+        Returns:
+            Словарь с результатами обновления для каждого порта
+        """
+        results = {}
+        
+        with self._lock:
+            for port in list(self.instances.keys()):
+                try:
+                    results[port] = self.test_and_update_instance_nodes(port)
+                except Exception as e:
+                    logger.error(f"Error testing nodes for instance {port}: {e}")
+                    results[port] = False
+        
+        successful_updates = sum(1 for success in results.values() if success)
+        logger.info(f"Completed testing all instances: {successful_updates}/{len(results)} successful updates")
+        
+        return results
+    
+    def get_exit_node_tester_stats(self) -> Dict:
+        """
+        Возвращает статистику тестера выходных узлов.
+        
+        Returns:
+            Словарь со статистикой тестирования
+        """
+        return self.exit_node_tester.get_test_stats()

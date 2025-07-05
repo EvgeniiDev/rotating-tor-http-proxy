@@ -20,7 +20,10 @@ Fetches Tor relay lists, extracts exit node IPs, and computes distributions for 
 Implements HTTP proxy load balancer interface: `add_proxy`, `remove_proxy`, request routing. Integrated with pool manager.
 
 ## tor_pool_manager.py
-Coordinates a pool of Tor processes using single-threaded monitoring: startup, shutdown, cleanup, stats, health monitoring, hot-reload of exit_nodes, and integration with load balancer.
+Coordinates a pool of Tor processes using single-threaded monitoring: startup, shutdown, cleanup, stats, health monitoring, hot-reload of exit_nodes, and integration with load balancer. Integrates with exit node tester for node validation.
+
+## exit_node_tester.py
+Tests and filters Tor exit nodes for reliability: multi-threaded testing, HTTP status code validation, and integration with pool manager for node updates. Uses Steam Community Market as test endpoint.
 
 ## main.py
 Application entry point: initializes configuration, relay manager, load balancer, pool manager; starts the pool and monitors until shutdown.
@@ -36,9 +39,11 @@ Application entry point: initializes configuration, relay manager, load balancer
     ├ http_load_balancer.py
     └ tor_pool_manager.py
            ├ tor_process.py
+           ├ exit_node_tester.py
            └ utils.py
 ```
 
 - `main.py` wires up all components.
 - `tor_pool_manager` uses `TorProcess` to manage individual processes with unified monitoring.
+- `exit_node_tester` provides node validation and filtering capabilities.
 - `utils` provides helpers for thread and process management across modules.
