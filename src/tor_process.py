@@ -13,7 +13,7 @@ TEST_URLS = [
     'https://icanhazip.com'
 ]
 
-REQUEST_TIMEOUT = 30
+REQUEST_TIMEOUT = 10
 
 
 class TorProcess:
