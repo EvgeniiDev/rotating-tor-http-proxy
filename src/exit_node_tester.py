@@ -113,14 +113,12 @@ class ExitNodeTester:
                         
                         if not worker_instance.reload_exit_nodes([node_ip], self.config_manager):
                             logger.warning(f"Worker {worker_id}: Failed to reload exit nodes for {node_ip}")
-                            node_queue.task_done()
                             continue
                         
                         time.sleep(3)
                         
                         if not self._wait_for_connection_ready(worker_instance):
                             logger.warning(f"Worker {worker_id}: Connection not ready for {node_ip}")
-                            node_queue.task_done()
                             continue
                         
                         if self._test_single_node_requests(worker_instance, node_ip):
