@@ -77,3 +77,15 @@ sudo systemctl status tor-http-proxy
 ```bash
 journalctl -u tor-http-proxy -f
 ```
+
+## Очистка временных файлов
+
+Система автоматически очищает временные файлы при запуске, но для ручной очистки можно использовать:
+
+```bash
+# Bash скрипт для очистки
+./cleanup_temp_files.sh
+
+# Python скрипт для детальной очистки
+python src/cleanup_temp_files.py
+```

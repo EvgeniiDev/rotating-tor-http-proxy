@@ -43,10 +43,13 @@ class ConfigManager:
             "MaxCircuitDirtiness 10",
             "NewCircuitPeriod 10",
             "ExitRelay 0",
-            "RefuseUnknownExits 0", # allow use unknown nodes as exit
+            "RefuseUnknownExits 0",
             "ClientOnly 1",
             "UseMicrodescriptors 1",
             "AvoidDiskWrites 1",
+            "FetchHidServDescriptors 0",
+            "LearnCircuitBuildTimeout 0",
+            "CircuitBuildTimeout 10",
             f"ExitNodes {exit_nodes_str}",
             "StrictNodes 1", # disallow to use other exit nodes. I think it doesn't work
             "EnforceDistinctSubnets 0", # allow to use exit ip from same subnet (/16)
@@ -64,6 +67,9 @@ class ConfigManager:
             "ClientOnly 1",
             "UseMicrodescriptors 1",
             "AvoidDiskWrites 1",
+            "FetchHidServDescriptors 0",
+            "LearnCircuitBuildTimeout 0",
+            "CircuitBuildTimeout 10",
         ]
         
         return '\n'.join(config_lines)
