@@ -53,3 +53,17 @@ class ConfigManager:
         ]
         
         return '\n'.join(config_lines)
+
+    def get_tor_config_without_exit_nodes(self, socks_port: int) -> str:
+        config_lines = [
+            f"SocksPort 127.0.0.1:{socks_port}",
+            f"DataDirectory {self.data_dir}/data_{socks_port}",
+            "MaxCircuitDirtiness 10",
+            "NewCircuitPeriod 10", 
+            "ExitRelay 0",
+            "ClientOnly 1",
+            "UseMicrodescriptors 1",
+            "AvoidDiskWrites 1",
+        ]
+        
+        return '\n'.join(config_lines)
