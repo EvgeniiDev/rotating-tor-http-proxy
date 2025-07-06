@@ -13,164 +13,114 @@ from config_manager import ConfigManager
 logger = logging.getLogger(__name__)
 
 class ExitNodeTester:
-    """
-    Модуль для тестирования выходных узлов Tor.
-    Проверяет узлы на работоспособность через HTTP-запросы к Steam Community Market.
-    """
     
     def __init__(self, config_manager: ConfigManager):
         self.config_manager = config_manager
         self.test_url = "https://steamcommunity.com/market/search?appid=730"
-        self.required_success_count = 4  # Минимум 4 успешных ответа из 6
-        self.test_requests_count = 6     # Количество тестовых запросов
-        self.max_workers = 20            # Увеличиваем количество потоков для большей производительности
-        self.timeout = 30                # Таймаут для HTTP-запросов в секундах
+        self.required_success_count = 3
+        self.test_requests_count = 6
+        self.max_workers = 20
+        self.timeout = 60
+        self._port_counter = 30000
+        self._port_lock = threading.Lock()
         
     def test_exit_nodes(self, exit_nodes: List[str]) -> List[str]:
-        """
-        Тестирует список выходных узлов и возвращает только рабочие.
-        
-        Args:
-            exit_nodes: Список IP-адресов выходных узлов для тестирования
-            
-        Returns:
-            Список IP-адресов узлов, прошедших тестирование
-        """
         if not exit_nodes:
             logger.warning("No exit nodes provided for testing")
             return []
             
         logger.info(f"Starting testing of {len(exit_nodes)} exit nodes")
         
-        # Создаем временный Tor процесс для тестирования
-        test_port = self._get_test_port()
-        test_instance = TorProcess(port=test_port, exit_nodes=exit_nodes)
+        working_nodes = self._test_nodes_parallel(exit_nodes)
         
-        if not test_instance.create_config(self.config_manager):
-            logger.error(f"Failed to create config for test instance on port {test_port}")
-            return []
-            
-        if not test_instance.start_process():
-            logger.error(f"Failed to start test instance on port {test_port}")
-            test_instance.cleanup()
-            return []
-            
-        try:
-            # Ждем запуска процесса
-            if not self._wait_for_startup(test_instance):
-                logger.error(f"Test instance on port {test_port} failed to start properly")
-                return []
-                
-            logger.info(f"Test instance started successfully on port {test_port}")
-            
-            # Тестируем узлы
-            working_nodes = self._test_nodes_with_threads(test_instance, exit_nodes)
-            
-            logger.info(f"Testing completed. {len(working_nodes)}/{len(exit_nodes)} nodes passed the test")
-            return working_nodes
-            
-        finally:
-            # Очищаем временный процесс
-            test_instance.stop_process()
-            test_instance.cleanup()
-            logger.info(f"Test instance on port {test_port} cleaned up")
-    
-    def _get_test_port(self) -> int:
-        """Генерирует уникальный порт для тестового процесса"""
-        return 20000 + int(time.time() % 10000)
-    
-    def _wait_for_startup(self, instance: TorProcess, timeout: int = 60) -> bool:
-        """Ждет запуска Tor процесса"""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            if instance.test_connection():
-                return True
-            time.sleep(2)
-        return False
-    
-    def _test_nodes_with_threads(self, instance: TorProcess, exit_nodes: List[str]) -> List[str]:
-        """
-        Тестирует узлы в многопоточном режиме.
+        total_nodes = len(exit_nodes)
+        working_count = len(working_nodes)
+        failure_count = total_nodes - working_count
+        success_rate = (working_count / total_nodes * 100) if total_nodes > 0 else 0
         
-        Args:
-            instance: Экземпляр TorProcess для тестирования
-            exit_nodes: Список узлов для тестирования
-            
-        Returns:
-            Список рабочих узлов
-        """
+        logger.info(f"Testing completed. {working_count}/{total_nodes} nodes passed ({success_rate:.1f}% success rate)")
+        
+        if failure_count > 0:
+            logger.warning(f"{failure_count} nodes failed testing")
+            if working_count == 0:
+                logger.error("No working nodes found! This may indicate:")
+                logger.error("- Network connectivity issues")
+                logger.error("- Tor configuration problems")
+                logger.error("- Target website blocking all exit nodes")
+                logger.error("- Proxy configuration issues")
+            elif success_rate < 30:
+                logger.warning(f"Low success rate ({success_rate:.1f}%) may indicate systemic issues")
+        
+        return working_nodes
+    
+    def _get_unique_test_port(self) -> int:
+        with self._port_lock:
+            port = self._port_counter
+            self._port_counter += 1
+            return port
+    
+    def _test_nodes_parallel(self, exit_nodes: List[str]) -> List[str]:
         working_nodes = []
         lock = threading.Lock()
         total_nodes = len(exit_nodes)
         tested_count = 0
         progress_lock = threading.Lock()
         
-        def test_single_node(node_ip: str) -> Optional[str]:
-            """Тестирует один узел"""
+        def test_single_node_with_own_process(node_ip: str) -> Optional[str]:
             nonlocal tested_count
+            node_instance = None
             try:
-                success_count = 0
+                node_port = self._get_unique_test_port()
+                node_instance = TorProcess(port=node_port, exit_nodes=[node_ip])
                 
-                # Обновляем конфигурацию для использования только одного узла
-                if not instance.reload_exit_nodes([node_ip], self.config_manager):
-                    logger.warning(f"Failed to reload exit nodes for {node_ip}")
+                logger.debug(f"Node {node_ip}: Creating dedicated process on port {node_port}")
+                
+                if not node_instance.create_config(self.config_manager):
+                    logger.warning(f"Node {node_ip}: Failed to create config on port {node_port}")
                     return None
                 
-                # Ждем немного для применения изменений
-                time.sleep(3)
+                if not node_instance.start_process():
+                    logger.warning(f"Node {node_ip}: Failed to start process on port {node_port}")
+                    return None
                 
-                # Выполняем тестовые запросы
-                for i in range(self.test_requests_count):
-                    try:
-                        response = requests.get(
-                            self.test_url,
-                            proxies=instance.get_proxies(),
-                            timeout=self.timeout
-                        )
-                        
-                        if response.status_code == 200:
-                            success_count += 1
-                            logger.debug(f"Node {node_ip}: Request {i+1} successful (200)")
-                        else:
-                            logger.debug(f"Node {node_ip}: Request {i+1} failed (HTTP {response.status_code})")
-                            
-                    except requests.RequestException as e:
-                        logger.debug(f"Node {node_ip}: Request {i+1} failed with exception: {e}")
-                        continue
+                if not self._wait_for_startup(node_instance, timeout=60):
+                    logger.warning(f"Node {node_ip}: Process failed to start on port {node_port}")
+                    return None
                 
-                # Проверяем результат
-                if success_count >= self.required_success_count:
-                    logger.info(f"Node {node_ip} passed test: {success_count}/{self.test_requests_count} successful requests")
+                logger.debug(f"Node {node_ip}: Process started successfully on port {node_port}")
+                
+                if self._test_single_node_requests(node_instance, node_ip):
+                    logger.info(f"Node {node_ip} PASSED (port {node_port})")
                     result = node_ip
                 else:
-                    logger.info(f"Node {node_ip} failed test: {success_count}/{self.test_requests_count} successful requests")
+                    logger.warning(f"Node {node_ip} FAILED (port {node_port})")
                     result = None
                 
-                # Обновляем прогресс
                 with progress_lock:
                     tested_count += 1
                     progress = (tested_count / total_nodes) * 100
-                    if tested_count % 10 == 0 or tested_count == total_nodes:  # Показываем каждые 10 узлов или последний
+                    if tested_count % 10 == 0 or tested_count == total_nodes:
                         logger.info(f"Testing progress: {tested_count}/{total_nodes} nodes tested ({progress:.1f}%)")
                 
                 return result
-                    
+                
             except Exception as e:
                 logger.error(f"Error testing node {node_ip}: {e}")
-                # Обновляем прогресс даже при ошибке
                 with progress_lock:
                     tested_count += 1
                 return None
+            finally:
+                if node_instance:
+                    node_instance.stop_process()
+                    node_instance.cleanup()
+                    logger.debug(f"Node {node_ip}: Cleaned up process on port {node_instance.port}")
         
-        # Запускаем тестирование в пуле потоков
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # Создаем задачи для всех узлов
             future_to_node = {
-                executor.submit(test_single_node, node): node 
+                executor.submit(test_single_node_with_own_process, node): node 
                 for node in exit_nodes
             }
             
-            # Обрабатываем результаты по мере завершения
             for future in as_completed(future_to_node):
                 node = future_to_node[future]
                 try:
@@ -183,17 +133,106 @@ class ExitNodeTester:
         
         return working_nodes
     
-    def test_and_filter_nodes(self, exit_nodes: List[str]) -> List[str]:
-        """
-        Тестирует и фильтрует узлы, возвращая только рабочие.
-        Удобный метод для быстрого использования.
+    def _wait_for_startup(self, instance: TorProcess, timeout: int = 120) -> bool:
+        logger.info(f"Waiting for Tor process on port {instance.port} to start up...")
+        start_time = time.time()
         
-        Args:
-            exit_nodes: Список узлов для тестирования
+        logger.debug(f"Process PID: {instance.process.pid if instance.process else 'None'}")
+        logger.debug(f"Config file: {instance.config_file}")
+        
+        while time.time() - start_time < timeout:
+            elapsed = time.time() - start_time
             
-        Returns:
-            Отфильтрованный список рабочих узлов
-        """
+            if instance.process and instance.process.poll() is not None:
+                logger.error(f"Tor process on port {instance.port} died during startup (exit code: {instance.process.returncode})")
+                if instance.process.stdout:
+                    stdout = instance.process.stdout.read().decode('utf-8', errors='ignore')
+                    if stdout:
+                        logger.error(f"Tor stdout: {stdout}")
+                if instance.process.stderr:
+                    stderr = instance.process.stderr.read().decode('utf-8', errors='ignore')
+                    if stderr:
+                        logger.error(f"Tor stderr: {stderr}")
+                return False
+                
+            logger.debug(f"Testing connection at {elapsed:.1f}s...")
+            connection_result = instance.test_connection()
+            logger.debug(f"Connection test result: {connection_result}")
+            
+            if connection_result:
+                logger.info(f"Tor process on port {instance.port} is ready after {elapsed:.1f}s")
+                return True
+                
+            if elapsed > 0 and int(elapsed) % 15 == 0:
+                logger.info(f"Still waiting for Tor startup on port {instance.port}... ({elapsed:.0f}s elapsed)")
+            
+            time.sleep(3)
+        
+        logger.warning(f"Tor process on port {instance.port} failed to start within {timeout}s")
+        return False
+    
+    def _test_single_node_requests(self, instance: TorProcess, node_ip: str) -> bool:
+        success_count = 0
+        error_diagnostics = []
+        
+        for i in range(self.test_requests_count):
+            request_errors = []
+            try:
+                response = requests.get(
+                    self.test_url,
+                    proxies=instance.get_proxies(),
+                    timeout=self.timeout
+                )
+                
+                response_size = len(response.content)
+                
+                logger.info(f"Node {node_ip}: Request {i+1} - Status: {response.status_code}, Size: {response_size} bytes")
+                
+                if response.status_code == 200:
+                    success_count += 1
+                    logger.info(f"Node {node_ip}: Request {i+1} successful (200)")
+                else:
+                    error_code = f"HTTP_{response.status_code}"
+                    request_errors.append(error_code)
+                    logger.warning(f"Node {node_ip}: Request {i+1} failed - {error_code}")
+                    
+            except requests.exceptions.ConnectTimeout as e:
+                error_code = "CONNECT_TIMEOUT"
+                request_errors.append(error_code)
+                logger.warning(f"Node {node_ip}: Request {i+1} failed - {error_code}: {e}")
+                continue
+            except requests.exceptions.ReadTimeout as e:
+                error_code = "READ_TIMEOUT"
+                request_errors.append(error_code)
+                logger.warning(f"Node {node_ip}: Request {i+1} failed - {error_code}: {e}")
+                continue
+            except requests.exceptions.ConnectionError as e:
+                error_code = "CONNECTION_ERROR"
+                request_errors.append(error_code)
+                logger.warning(f"Node {node_ip}: Request {i+1} failed - {error_code}: {e}")
+                continue
+            except Exception as e:
+                error_code = "UNEXPECTED_ERROR"
+                request_errors.append(error_code)
+                logger.error(f"Node {node_ip}: Request {i+1} failed - {error_code}: {e}")
+                continue
+            
+            if request_errors:
+                error_diagnostics.append(f"Req{i+1}: {','.join(request_errors)}")
+        
+        if error_diagnostics:
+            logger.info(f"Node {node_ip}: Error diagnostics: {' | '.join(error_diagnostics)}")
+        
+        success = success_count >= self.required_success_count
+        
+        if success:
+            logger.info(f"Node {node_ip} PASSED: {success_count}/{self.test_requests_count} requests")
+        else:
+            logger.warning(f"Node {node_ip} FAILED: {success_count}/{self.test_requests_count} requests")
+        
+        return success
+    
+    def test_and_filter_nodes(self, exit_nodes: List[str]) -> List[str]:
         start_time = time.time()
         working_nodes = self.test_exit_nodes(exit_nodes)
         elapsed_time = time.time() - start_time
@@ -204,7 +243,6 @@ class ExitNodeTester:
         return working_nodes
     
     def get_test_stats(self) -> Dict:
-        """Возвращает статистику тестирования"""
         return {
             'test_url': self.test_url,
             'required_success_count': self.required_success_count,

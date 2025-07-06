@@ -108,9 +108,13 @@ class TorProcess:
             self.config_file = None
 
     def test_connection(self) -> bool:
-        for url in TEST_URLS:
-            if self._make_request(url):
-                return True
+        for i, url in enumerate(TEST_URLS):
+            try:
+                response = self._make_request(url)
+                if response:
+                    return True
+            except Exception as e:
+                continue
         return False
 
     def check_health(self) -> bool:
@@ -165,9 +169,10 @@ class TorProcess:
                 os.killpg(os.getpgid(self.process.pid), signal.SIGHUP)
             else:
                 self.process.send_signal(signal.SIGHUP)
-                
+            
+            time.sleep(1)
             return True
-        except (OSError, ProcessLookupError, PermissionError) as e:
+        except (OSError, ProcessLookupError, PermissionError, IOError):
             return False
 
     def report_active_exit_node(self, ip: str):
