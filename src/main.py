@@ -22,7 +22,36 @@ logging.getLogger('urllib3').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 shutdown_event = threading.Event()
 
+def cleanup_temp_files():
+    import glob
+    import shutil
+    
+    data_dir = os.path.expanduser('~/tor-http-proxy/data')
+    if not os.path.exists(data_dir):
+        return
+    
+    try:
+        temp_patterns = [
+            os.path.join(data_dir, 'data_*'),
+            os.path.join(data_dir, 'torrc.*'),
+            '/tmp/tor_*'
+        ]
+        
+        for pattern in temp_patterns:
+            for path in glob.glob(pattern):
+                try:
+                    if os.path.isdir(path):
+                        shutil.rmtree(path)
+                    else:
+                        os.unlink(path)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
 def main():    
+    cleanup_temp_files()
+    
     tor_processes = int(os.environ.get('TOR_PROCESSES', '50'))
     
     logger.info("Запуск Rotating Tor HTTP Proxy")
@@ -31,7 +60,7 @@ def main():
     config_manager = ConfigManager()
     relay_manager = TorRelayManager()
     
-    http_balancer = HTTPLoadBalancer(listen_port=8080)
+    http_balancer = HTTPLoadBalancer(listen_port=8081)
     http_balancer.start()
     
     tor_pool = TorPoolManager(
@@ -44,7 +73,7 @@ def main():
         logger.error("Не удалось запустить пул Tor процессов")
         sys.exit(1)
     
-    logger.info("HTTP прокси доступен по адресу: http://localhost:8080")
+    logger.info("HTTP прокси доступен по адресу: http://localhost:8081")
     logger.info("Сервисы запущены. Нажмите Ctrl+C для остановки.")
 
     def signal_handler(sig, frame):

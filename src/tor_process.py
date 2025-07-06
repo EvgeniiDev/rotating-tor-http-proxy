@@ -56,10 +56,15 @@ class TorProcess:
         temp_fd, self.config_file = tempfile.mkstemp(suffix='.torrc', prefix=f'tor_{self.port}_')
         
         with os.fdopen(temp_fd, 'w') as f:
-            config_content = config_manager.get_tor_config_by_port(
-                self.port, 
-                self.exit_nodes
-            )
+            if self.exit_nodes:
+                config_content = config_manager.get_tor_config_by_port(
+                    self.port, 
+                    self.exit_nodes
+                )
+            else:
+                config_content = config_manager.get_tor_config_without_exit_nodes(
+                    self.port
+                )
             f.write(config_content)
             
         return True
@@ -106,6 +111,14 @@ class TorProcess:
         if self.config_file and os.path.exists(self.config_file):
             os.unlink(self.config_file)
             self.config_file = None
+        
+        data_dir = os.path.expanduser(f'~/tor-http-proxy/data/data_{self.port}')
+        if os.path.exists(data_dir):
+            import shutil
+            try:
+                shutil.rmtree(data_dir)
+            except Exception:
+                pass
 
     def test_connection(self) -> bool:
         for i, url in enumerate(TEST_URLS):
@@ -154,6 +167,9 @@ class TorProcess:
 
     def reload_exit_nodes(self, new_exit_nodes: List[str], config_manager) -> bool:
         if not self.process or self.process.poll() is not None:
+            return False
+        
+        if not self.config_file or not os.path.exists(self.config_file):
             return False
         
         try:
