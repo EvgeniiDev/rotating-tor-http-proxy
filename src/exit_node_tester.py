@@ -1,11 +1,8 @@
-import asyncio
 import logging
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Dict, Set, Optional
+from typing import List, Dict
 import requests
-from datetime import datetime
 
 from tor_process import TorProcess
 from config_manager import ConfigManager
@@ -19,7 +16,7 @@ class ExitNodeTester:
         self.test_url = "https://steamcommunity.com/market/search?appid=730"
         self.required_success_count = 3
         self.test_requests_count = 6
-        self.max_workers = 20
+        self.max_workers = 10
         self.timeout = 60
         self._port_counter = 30000
         self._port_lock = threading.Lock()
@@ -29,7 +26,7 @@ class ExitNodeTester:
             logger.warning("No exit nodes provided for testing")
             return []
             
-        logger.info(f"Starting testing of {len(exit_nodes)} exit nodes")
+        logger.info(f"Starting testing of {len(exit_nodes)} exit nodes with {self.max_workers} workers")
         
         working_nodes = self._test_nodes_parallel(exit_nodes)
         
@@ -66,70 +63,100 @@ class ExitNodeTester:
         tested_count = 0
         progress_lock = threading.Lock()
         
-        def test_single_node_with_own_process(node_ip: str) -> Optional[str]:
-            nonlocal tested_count
-            node_instance = None
-            try:
-                node_port = self._get_unique_test_port()
-                node_instance = TorProcess(port=node_port, exit_nodes=[node_ip])
-                
-                logger.debug(f"Node {node_ip}: Creating dedicated process on port {node_port}")
-                
-                if not node_instance.create_config(self.config_manager):
-                    logger.warning(f"Node {node_ip}: Failed to create config on port {node_port}")
-                    return None
-                
-                if not node_instance.start_process():
-                    logger.warning(f"Node {node_ip}: Failed to start process on port {node_port}")
-                    return None
-                
-                if not self._wait_for_startup(node_instance, timeout=60):
-                    logger.warning(f"Node {node_ip}: Process failed to start on port {node_port}")
-                    return None
-                
-                logger.debug(f"Node {node_ip}: Process started successfully on port {node_port}")
-                
-                if self._test_single_node_requests(node_instance, node_ip):
-                    logger.info(f"Node {node_ip} PASSED (port {node_port})")
-                    result = node_ip
-                else:
-                    logger.warning(f"Node {node_ip} FAILED (port {node_port})")
-                    result = None
-                
-                with progress_lock:
-                    tested_count += 1
-                    progress = (tested_count / total_nodes) * 100
-                    if tested_count % 10 == 0 or tested_count == total_nodes:
-                        logger.info(f"Testing progress: {tested_count}/{total_nodes} nodes tested ({progress:.1f}%)")
-                
-                return result
-                
-            except Exception as e:
-                logger.error(f"Error testing node {node_ip}: {e}")
-                with progress_lock:
-                    tested_count += 1
-                return None
-            finally:
-                if node_instance:
-                    node_instance.stop_process()
-                    node_instance.cleanup()
-                    logger.debug(f"Node {node_ip}: Cleaned up process on port {node_instance.port}")
+        worker_instances = []
         
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_node = {
-                executor.submit(test_single_node_with_own_process, node): node 
-                for node in exit_nodes
-            }
+        try:
+            for i in range(self.max_workers):
+                worker_port = self._get_unique_test_port()
+                worker_instance = TorProcess(port=worker_port, exit_nodes=exit_nodes[:1])
+                
+                if not worker_instance.create_config(self.config_manager):
+                    logger.warning(f"Failed to create config for worker {i} on port {worker_port}")
+                    continue
+                
+                if not worker_instance.start_process():
+                    logger.warning(f"Failed to start worker {i} on port {worker_port}")
+                    worker_instance.cleanup()
+                    continue
+                
+                if not self._wait_for_startup(worker_instance, timeout=60):
+                    logger.warning(f"Worker {i} failed to start on port {worker_port}")
+                    worker_instance.stop_process()
+                    worker_instance.cleanup()
+                    continue
+                
+                worker_instances.append(worker_instance)
+                logger.debug(f"Worker {i} started successfully on port {worker_port}")
             
-            for future in as_completed(future_to_node):
-                node = future_to_node[future]
-                try:
-                    result = future.result()
-                    if result:
-                        with lock:
-                            working_nodes.append(result)
-                except Exception as e:
-                    logger.error(f"Exception occurred while testing node {node}: {e}")
+            if not worker_instances:
+                logger.error("No worker instances could be started")
+                return []
+            
+            logger.info(f"Started {len(worker_instances)} worker processes")
+            
+            from queue import Queue
+            node_queue = Queue()
+            for node in exit_nodes:
+                node_queue.put(node)
+            
+            def worker_thread(worker_instance: TorProcess, worker_id: int):
+                nonlocal tested_count
+                
+                while True:
+                    try:
+                        node_ip = node_queue.get(timeout=1)
+                    except:
+                        break
+                    
+                    try:
+                        logger.debug(f"Worker {worker_id}: Testing node {node_ip}")
+                        
+                        if not worker_instance.reload_exit_nodes([node_ip], self.config_manager):
+                            logger.warning(f"Worker {worker_id}: Failed to reload exit nodes for {node_ip}")
+                            node_queue.task_done()
+                            continue
+                        
+                        time.sleep(3)
+                        
+                        if not self._wait_for_connection_ready(worker_instance):
+                            logger.warning(f"Worker {worker_id}: Connection not ready for {node_ip}")
+                            node_queue.task_done()
+                            continue
+                        
+                        if self._test_single_node_requests(worker_instance, node_ip):
+                            logger.info(f"Node {node_ip} PASSED (worker {worker_id})")
+                            with lock:
+                                working_nodes.append(node_ip)
+                        else:
+                            logger.warning(f"Node {node_ip} FAILED (worker {worker_id})")
+                        
+                        with progress_lock:
+                            tested_count += 1
+                            progress = (tested_count / total_nodes) * 100
+                            if tested_count % 10 == 0 or tested_count == total_nodes:
+                                logger.info(f"Testing progress: {tested_count}/{total_nodes} nodes tested ({progress:.1f}%)")
+                        
+                    except Exception as e:
+                        logger.error(f"Worker {worker_id}: Error testing node {node_ip}: {e}")
+                    finally:
+                        node_queue.task_done()
+            
+            threads = []
+            for i, worker_instance in enumerate(worker_instances):
+                thread = threading.Thread(target=worker_thread, args=(worker_instance, i))
+                thread.start()
+                threads.append(thread)
+            
+            node_queue.join()
+            
+            for thread in threads:
+                thread.join()
+            
+        finally:
+            for worker_instance in worker_instances:
+                worker_instance.stop_process()
+                worker_instance.cleanup()
+                logger.debug(f"Cleaned up worker on port {worker_instance.port}")
         
         return working_nodes
     
@@ -171,6 +198,16 @@ class ExitNodeTester:
         logger.warning(f"Tor process on port {instance.port} failed to start within {timeout}s")
         return False
     
+    def _wait_for_connection_ready(self, instance: TorProcess, max_wait: int = 30) -> bool:
+        start_time = time.time()
+        
+        while time.time() - start_time < max_wait:
+            if instance.test_connection():
+                return True
+            time.sleep(2)
+        
+        return False
+
     def _test_single_node_requests(self, instance: TorProcess, node_ip: str) -> bool:
         success_count = 0
         error_diagnostics = []
@@ -249,4 +286,4 @@ class ExitNodeTester:
             'test_requests_count': self.test_requests_count,
             'max_workers': self.max_workers,
             'timeout': self.timeout
-        } 
+        }
