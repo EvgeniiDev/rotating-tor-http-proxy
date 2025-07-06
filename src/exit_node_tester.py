@@ -26,45 +26,71 @@ class WorkerPool:
             if self.workers:
                 return
             
-            logger.info(f"Initializing workers for 5-thread processing...")
+            logger.info(f"Initializing workers for {self.max_workers}-thread processing...")
             successful_workers = 0
-            max_attempts = 10
+            max_attempts = self.max_workers + 5
             
             for i in range(max_attempts):
-                if successful_workers >= 5:
+                if successful_workers >= self.max_workers:
                     break
                     
                 port = self.port_start + i
+                logger.info(f"Attempting to create worker {successful_workers + 1}/{self.max_workers} on port {port}")
                 worker = TorProcess(port=port, exit_nodes=[])
                 
                 try:
+                    logger.debug(f"Creating config for port {port}")
                     if worker.create_config(self.config_manager):
+                        logger.debug(f"Starting process for port {port}")
                         if worker.start_process():
+                            logger.debug(f"Waiting for startup on port {port}")
                             if self._wait_for_worker_startup(worker):
                                 self.workers.append(worker)
                                 successful_workers += 1
-                                logger.info(f"Worker {successful_workers}/5 ready on port {port}")
+                                logger.info(f"Worker {successful_workers}/{self.max_workers} ready on port {port}")
                             else:
+                                logger.warning(f"Worker startup failed on port {port}")
                                 worker.stop_process()
                                 worker.cleanup()
                         else:
+                            logger.warning(f"Process start failed on port {port}")
                             worker.cleanup()
                     else:
+                        logger.warning(f"Config creation failed on port {port}")
                         worker.cleanup()
-                except Exception:
+                except Exception as e:
+                    logger.error(f"Exception creating worker on port {port}: {e}")
                     worker.cleanup()
+                
+                if successful_workers < self.max_workers and i < max_attempts - 1:
+                    time.sleep(1)
             
             logger.info(f"Worker pool ready with {len(self.workers)} threads for parallel processing")
     
-    def _wait_for_worker_startup(self, worker: TorProcess, timeout: int = 10) -> bool:
+    def _wait_for_worker_startup(self, worker: TorProcess, timeout: int = 15) -> bool:
         start_time = time.time()
-        while time.time() - start_time < timeout:
+        connection_attempts = 0
+        max_attempts = 20
+        
+        while time.time() - start_time < timeout and connection_attempts < max_attempts:
+            connection_attempts += 1
+            
+            if worker.process and worker.process.poll() is not None:
+                logger.warning(f"Worker process on port {worker.port} died during startup")
+                return False
+            
             try:
                 if worker.test_connection():
+                    elapsed = time.time() - start_time
+                    logger.info(f"Worker on port {worker.port} ready after {elapsed:.1f}s")
                     return True
-            except Exception:
-                pass
-            time.sleep(0.3)
+            except Exception as e:
+                logger.debug(f"Connection attempt {connection_attempts} failed: {e}")
+            
+            time.sleep(0.5)
+        
+        elapsed = time.time() - start_time
+        logger.warning(f"Worker on port {worker.port} failed to become ready after {elapsed:.1f}s")
         return False
     
     def cleanup_workers(self):
