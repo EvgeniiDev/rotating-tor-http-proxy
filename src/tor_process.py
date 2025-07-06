@@ -73,19 +73,18 @@ class TorProcess:
         cmd = ['tor', '-f', self.config_file]
         
         try:
-            # Используем preexec_fn только на Unix-системах
             if hasattr(os, 'setsid'):
                 self.process = subprocess.Popen(
                     cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                     preexec_fn=os.setsid
                 )
             else:
                 self.process = subprocess.Popen(
                     cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
                 )
             
             self.is_running = True
