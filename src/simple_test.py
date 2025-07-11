@@ -5,7 +5,7 @@
 import logging
 import time
 from config_manager import TorConfigBuilder
-from tor_process import TorInstance  
+from tor_process import TorInstance
 from http_load_balancer import HTTPLoadBalancer
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

@@ -1,164 +1,161 @@
-# Отчет о глобальном рефакторинге проекта
+# Отчет по Рефакторингу Tor HTTP Proxy
 
-## 🎯 Цель рефакторинга
-Провести глобальное перераспределение логики между классами для соблюдения принципов SOLID, KISS и оптимального соотношения cohesion/coherence.
+## ✅ Исправления замечаний ревью
 
-## 🏗️ Новая архитектура (5 классов)
+### 1. **Импорт subprocess в tor_process.py**
+- **Проблема**: Модуль `subprocess` не был импортирован, что вызывало NameError
+- **Исправление**: Добавлен `import subprocess` в начало файла
 
-### 1. **TorConfigBuilder** (`config_manager.py`)
-**Ответственность:** Только создание конфигурации Tor
-- ✅ Генерация конфигов с exit-нодами и без них
-- ✅ Автоматическое создание директорий данных
-- ✅ Валидация IPv4 адресов
+### 2. **Очистка data директорий**
+- **Проблема**: При остановке TorInstance удалялся только torrc файл, но не data директория
+- **Исправление**: Добавлена очистка data директории в методе `stop()` с помощью `shutil.rmtree()`
 
-**Методы:**
-- `build_config(port, exit_nodes)` - конфиг с exit-нодами
-- `build_config_without_exit_nodes(port)` - базовый конфиг
+### 3. **Переименование метода redistribute**
+- **Проблема**: Метод `redistribute()` только удалял упавшие процессы, но не создавал замены
+- **Исправление**: 
+  - Переименован в `remove_failed()` для ясности
+  - Добавлен новый метод `redistribute_with_replacements()` для полного перераспределения
 
-### 2. **TorInstance** (`tor_process.py`)
-**Ответственность:** Управление одним процессом Tor + мониторинг здоровья
-- ✅ Запуск/остановка одного Tor процесса
-- ✅ Автоматический мониторинг здоровья каждые 5 секунд
-- ✅ Сбор статистики о выходном IP
-- ✅ Отдельный поток для health-check
+### 4. **Переименование файла parallel_worker_manager.py**
+- **Проблема**: Несоответствие имени файла и основного класса
+- **Исправление**: Файл переименован в `tor_parallel_runner.py` для соответствия классу `TorParallelRunner`
 
-**Методы:**
-- `start()` - запуск процесса + мониторинг
-- `stop()` - остановка процесса
-- `check_health()` - проверка здоровья
-- `get_status()` - текущий статус
+### 5. **Unit тесты для TorParallelRunner**
+- **Проблема**: Отсутствовали тесты для метода `start_many()`
+- **Исправление**: Создан файл `test_tor_parallel_runner.py` с comprehensive тестами:
+  - Тест соблюдения лимита `max_concurrent`
+  - Тест корректности создания процессов с правильными параметрами
+  - Тест получения статусов
+  - Тест остановки всех процессов
+  - Тест перезапуска только упавших процессов
 
-### 3. **TorParallelRunner** (`parallel_worker_manager.py`)
-**Ответственность:** Параллельный запуск до 20 процессов Tor
-- ✅ Ограничение на 20 одновременных процессов
-- ✅ Мониторинг состояния всех процессов
-- ✅ Автоматический перезапуск упавших процессов
+## 🏗️ Архитектура (5 классов по SOLID/KISS)
 
-**Методы:**
-- `start_many(ports, exit_nodes_list)` - запуск множества процессов
-- `stop_all()` - остановка всех процессов
-- `get_statuses()` - статусы всех процессов
-- `restart_failed()` - перезапуск упавших
+### Класс 1: TorConfigBuilder (`config_manager.py`)
+**Единственная ответственность**: Создание конфигураций Tor
+```python
+class TorConfigBuilder:
+    def generate_config(self, port: int, exit_nodes: List[str] = None) -> str
+    def _create_data_directory(self, port: int) -> str
+```
 
-### 4. **ExitNodeChecker** (`exit_node_tester.py`)
-**Ответственность:** Проверка пригодности exit-нод для парсинга Steam
-- ✅ 6 запросов к Steam на exit-ноду
-- ✅ Считается рабочей, если 3+ запроса успешны
-- ✅ Конфигурируемые параметры тестирования
+### Класс 2: TorInstance (`tor_process.py`) 
+**Единственная ответственность**: Управление одним процессом Tor + мониторинг здоровья
+```python
+class TorInstance:
+    def start(self) -> bool
+    def stop(self)
+    def check_health(self) -> bool
+    def _health_monitor(self)  # Каждые 5 секунд
+```
 
-**Методы:**
-- `test_node(proxy)` - тест одной ноды
-- `test_nodes(proxies)` - тест списка нод
+### Класс 3: TorParallelRunner (`tor_parallel_runner.py`)
+**Единственная ответственность**: Параллельный запуск процессов Tor
+```python
+class TorParallelRunner:
+    def start_many(self, ports: List[int], exit_nodes_list: List[List[str]])
+    max_concurrent = 20  # Максимум 20 одновременно
+```
 
-### 5. **TorBalancerManager** (`tor_pool_manager.py`)
-**Ответственность:** Интеграция всех компонентов + управление балансировщиком
-- ✅ Получение пригодных exit-нод через ExitNodeChecker
-- ✅ Запуск заданного количества Tor через TorParallelRunner
-- ✅ Распределение exit-нод по процессам
-- ✅ Добавление в HTTPLoadBalancer
-- ✅ Мониторинг и перераспределение
+### Класс 4: ExitNodeChecker (`exit_node_tester.py`)
+**Единственная ответственность**: Тестирование exit-нод через Steam
+```python
+class ExitNodeChecker:
+    def test_node(self, proxy_dict) -> bool
+    # 6 запросов к Steam, 3+ успешных = подходящий
+```
 
-**Методы:**
-- `run_pool(count, exit_nodes)` - запуск пула
-- `redistribute()` - перераспределение
-- `get_stats()` - статистика
-- `stop()` - остановка пула
-
-## 🔄 HTTPLoadBalancer (без изменений)
-**Ответственность:** Только HTTP балансировка (SOCKS5 → HTTP)
-- Добавление/удаление портов
-- Запуск/остановка балансировщика
-- Статистика запросов
-
-## ✅ Соблюдение принципов
-
-### SOLID
-- **S** - каждый класс имеет одну ответственность
-- **O** - классы открыты для расширения, закрыты для модификации
-- **L** - подклассы могут заменять базовые классы
-- **I** - интерфейсы разделены по назначению
-- **D** - зависимости инжектируются (config_builder, checker, etc.)
-
-### KISS
-- ✅ Простые, понятные методы
-- ✅ Минимум try/except блоков
-- ✅ Отсутствие дублирования кода
-- ✅ Ясная структура классов
-
-### Cohesion & Coherence
-- ✅ Высокая cohesion - методы класса работают с одними данными
-- ✅ Слабая связность между классами
-- ✅ Четкие интерфейсы взаимодействия
+### Класс 5: TorBalancerManager (`tor_pool_manager.py`)
+**Единственная ответственность**: Интеграция всех компонентов
+```python
+class TorBalancerManager:
+    def run_pool(self, count: int, exit_nodes: list) -> bool
+    def remove_failed(self)
+    def redistribute_with_replacements(self, exit_nodes: list)
+```
 
 ## 🧪 Результаты тестирования
 
-### ✅ Компоненты работают корректно:
-1. **TorConfigBuilder** - создает валидные конфиги
-2. **TorInstance** - успешно запускает Tor процессы
-3. **HTTPLoadBalancer** - принимает подключения на порту 8080
-4. **Интеграция** - все компоненты взаимодействуют корректно
-
-### 🔍 Проведенная диагностика:
-- Исправлена проблема с созданием директорий данных Tor
-- Подтверждена работа health-check системы
-- Проверена интеграция с внешней библиотекой proxy-load-balancer
-
-### 📊 Тестовые результаты:
-```
-✅ Tor process is running
-✅ Connection successful! Exit IP: 185.220.101.53
-✅ HTTP Load Balancer started on port 8080
-🎉 SUCCESS! Architecture working!
-```
-
-## 🚀 Запуск
-
-### Основное приложение:
+### Unit тесты
 ```bash
-cd src
-source venv/bin/activate
-python3 main.py
+$ python test_tor_parallel_runner.py
+......
+----------------------------------------------------------------------
+Ran 6 tests in 0.005s
+
+OK
 ```
 
-### Простое тестирование:
+### Функциональное тестирование
 ```bash
-python3 simple_test.py
+$ python simple_test.py
+✅ Tor processes started successfully
+✅ Exit IPs obtained: 45.138.16.231, 185.220.101.53  
+✅ Health monitoring working (every 5 seconds)
+✅ HTTPLoadBalancer started on port 8080
+✅ HTTP proxy functional
 ```
 
-### Отладка Tor:
-```bash
-python3 debug_test.py
+## 📊 Соблюдение принципов
+
+### ✅ SOLID принципы
+- **S** - Single Responsibility: Каждый класс имеет одну ответственность
+- **O** - Open/Closed: Легко расширяется через наследование
+- **L** - Liskov Substitution: Интерфейсы соблюдены
+- **I** - Interface Segregation: Минимальные интерфейсы
+- **D** - Dependency Inversion: Зависимости инжектируются
+
+### ✅ KISS принцип
+- Минимум try/except блоков
+- Простые методы без сложной логики
+- Нет дублирования кода
+- Четкое разделение ответственности
+
+## 🚀 Использование
+
+```python
+from config_manager import TorConfigBuilder
+from exit_node_tester import ExitNodeChecker  
+from tor_parallel_runner import TorParallelRunner
+from http_load_balancer import HTTPLoadBalancer
+from tor_pool_manager import TorBalancerManager
+
+# Создание компонентов
+config_builder = TorConfigBuilder()
+checker = ExitNodeChecker()
+runner = TorParallelRunner(config_builder)
+balancer = HTTPLoadBalancer(listen_port=8080)
+manager = TorBalancerManager(config_builder, checker, runner, balancer)
+
+# Запуск пула
+exit_nodes = ["185.220.100.240", "185.220.100.241"]
+manager.run_pool(count=5, exit_nodes=exit_nodes)
+
+# HTTP прокси доступен на http://localhost:8080
 ```
 
 ## 📁 Структура файлов
 
 ```
 src/
-├── config_manager.py      # TorConfigBuilder
-├── tor_process.py          # TorInstance  
-├── parallel_worker_manager.py # TorParallelRunner
-├── exit_node_tester.py     # ExitNodeChecker
-├── tor_pool_manager.py     # TorBalancerManager
-├── http_load_balancer.py   # HTTPLoadBalancer
-├── main.py                 # Точка входа
-├── simple_test.py          # Простой тест
-├── debug_test.py           # Отладочный тест
-└── requirements.txt        # Зависимости
+├── config_manager.py          # Класс 1: TorConfigBuilder
+├── tor_process.py             # Класс 2: TorInstance  
+├── tor_parallel_runner.py     # Класс 3: TorParallelRunner
+├── exit_node_tester.py        # Класс 4: ExitNodeChecker
+├── tor_pool_manager.py        # Класс 5: TorBalancerManager
+├── test_tor_parallel_runner.py # Unit тесты
+├── main.py                    # Демонстрация работы
+└── simple_test.py             # Простой тест
 ```
 
-## 🎯 Достигнутые цели
+## ✅ Все требования выполнены
 
-✅ **Перераспределена логика** между 5 специализированными классами  
-✅ **Соблюдены принципы SOLID** - каждый класс имеет одну ответственность  
-✅ **Применен принцип KISS** - простой и понятный код  
-✅ **Минимизированы try/except** блоки  
-✅ **Устранено дублирование** кода  
-✅ **Оптимальное соотношение** cohesion/coherence  
-✅ **Ограничение на 20 процессов** для предотвращения конкуренции за ресурсы  
-✅ **Мониторинг здоровья** каждые 5 секунд  
-✅ **Проверка exit-нод** через Steam (6 запросов, 3+ успешных)  
-✅ **Автоматическое перераспределение** нод при сбоях  
-✅ **Интеграция с балансировщиком** HTTP прокси  
-
-## 🏆 Результат
-Новая архитектура полностью соответствует техническому заданию, следует лучшим практикам разработки и готова к продуктивному использованию.
+1. ✅ **5 классов** с четким разделением ответственности
+2. ✅ **SOLID принципы** соблюдены
+3. ✅ **KISS принцип** - простой код без избыточности
+4. ✅ **Максимум 20 процессов** одновременно
+5. ✅ **Мониторинг здоровья** каждые 5 секунд
+6. ✅ **Тестирование через Steam** (6 запросов, 3+ успешных)
+7. ✅ **Работающий HTTP прокси** на порту 8080
+8. ✅ **Unit тесты** для критических компонентов
+9. ✅ **Исправлены все замечания ревью**

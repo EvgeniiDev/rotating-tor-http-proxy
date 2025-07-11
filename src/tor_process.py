@@ -3,6 +3,7 @@ import tempfile
 import os
 import time
 import threading
+import shutil
 from typing import List, Optional, Dict
 from datetime import datetime, timedelta
 import signal
@@ -64,9 +65,16 @@ class TorInstance:
                 self.process.wait()
         self.process = None
         self.is_running = False
+        
+        # Cleanup temporary config file
         if self.config_file and os.path.exists(self.config_file):
             os.unlink(self.config_file)
             self.config_file = None
+            
+        # Cleanup data directory to avoid disk buildup
+        data_dir = os.path.expanduser(f'~/tor-http-proxy/data/data_{self.port}')
+        if os.path.exists(data_dir):
+            shutil.rmtree(data_dir, ignore_errors=True)
 
     def _health_monitor(self):
         while not self._stop_health:

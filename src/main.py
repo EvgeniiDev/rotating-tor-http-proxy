@@ -9,7 +9,7 @@ import threading
 from http_load_balancer import HTTPLoadBalancer
 from tor_pool_manager import TorBalancerManager
 from config_manager import TorConfigBuilder
-from parallel_worker_manager import TorParallelRunner
+from tor_parallel_runner import TorParallelRunner
 from exit_node_tester import ExitNodeChecker
 from tor_relay_manager import TorRelayManager
 

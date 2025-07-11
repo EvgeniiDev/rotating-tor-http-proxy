@@ -73,14 +73,46 @@ class TorBalancerManager:
         logger.info(f"Successfully started {len(ports)} Tor processes and added to balancer")
         return True
 
-    def redistribute(self):
+    def remove_failed(self):
+        """
+        Removes failed processes from the balancer without spawning replacements.
+        For full redistribution with replacement spawning, use redistribute_with_replacements().
+        """
         with self._lock:
             statuses = self.runner.get_statuses()
             failed_ports = [port for port, status in statuses.items() if status.get('failed_checks', 0) >= 3]
             if failed_ports:
-                logger.info(f"Redistributing {len(failed_ports)} failed processes")
+                logger.info(f"Removing {len(failed_ports)} failed processes from balancer")
                 for port in failed_ports:
                     self.http_balancer.remove_proxy(port)
+                    
+    def redistribute_with_replacements(self, exit_nodes: list):
+        """
+        Removes failed processes and spawns replacements with new exit nodes.
+        """
+        with self._lock:
+            statuses = self.runner.get_statuses()
+            failed_ports = [port for port, status in statuses.items() if status.get('failed_checks', 0) >= 3]
+            
+            if failed_ports and exit_nodes:
+                logger.info(f"Redistributing {len(failed_ports)} failed processes with replacements")
+                
+                # Remove failed processes
+                for port in failed_ports:
+                    self.http_balancer.remove_proxy(port)
+                
+                # Spawn replacements with new exit nodes
+                new_ports = [port + 1000 for port in failed_ports]  # Use different ports
+                new_exit_nodes = [exit_nodes[i % len(exit_nodes)] for i in range(len(failed_ports))]
+                exit_nodes_for_runner = [[node] for node in new_exit_nodes]
+                
+                self.runner.start_many(new_ports, exit_nodes_for_runner)
+                
+                # Add new processes to balancer
+                for port in new_ports:
+                    self.http_balancer.add_proxy(port)
+                
+                logger.info(f"Successfully redistributed {len(new_ports)} replacement processes")
 
     def get_stats(self):
         with self._lock:
