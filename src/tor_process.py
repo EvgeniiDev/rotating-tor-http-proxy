@@ -2,11 +2,11 @@ import subprocess
 import tempfile
 import os
 import time
+import threading
 from typing import List, Optional, Dict
 from datetime import datetime, timedelta
 import signal
 import requests
-import threading
 
 class TorInstance:
     """
