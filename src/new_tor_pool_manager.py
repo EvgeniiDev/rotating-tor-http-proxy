@@ -12,30 +12,21 @@ logger = logging.getLogger(__name__)
 
 
 class TorPoolManager:
-    """
-    Класс для параллельного запуска множества процессов Tor.
-    Максимум 20 процессов одновременно для избежания конкуренции за ресурсы.
-    Использует TorProcessManager для управления отдельными процессами.
-    """
     
     def __init__(self, config_builder: TorConfigBuilder, max_concurrent: int = 20):
         self.config_builder = config_builder
         self.max_concurrent = max_concurrent
         
-        # Управление процессами
-        self.processes: Dict[int, TorProcessManager] = {}  # port -> TorProcessManager
+        self.processes: Dict[int, TorProcessManager] = {}
         self.running_processes: Set[int] = set()
         self.failed_processes: Set[int] = set()
         
-        # Синхронизация
         self._lock = threading.RLock()
         self._shutdown_event = threading.Event()
         
-        # Мониторинг
         self._monitoring_thread: Optional[threading.Thread] = None
         self.is_running = False
         
-        # Статистика
         self.stats = {
             'total_processes': 0,
             'running_processes': 0,
@@ -44,21 +35,10 @@ class TorPoolManager:
         }
         
     def start_processes(self, process_configs: List[Dict]) -> Dict[str, List[int]]:
-        """
-        Запускает процессы Tor параллельно.
-        
-        Args:
-            process_configs: Список конфигураций процессов
-                [{'port': int, 'exit_nodes': List[str]}, ...]
-        
-        Returns:
-            Dict с успешными и неудачными портами
-        """
         if not process_configs:
             logger.warning("No process configurations provided")
             return {'successful': [], 'failed': []}
         
-        # Ограничиваем количество одновременных запусков
         configs_to_start = process_configs[:self.max_concurrent]
         if len(process_configs) > self.max_concurrent:
             logger.warning(f"Limiting concurrent starts to {self.max_concurrent} processes "
@@ -69,7 +49,6 @@ class TorPoolManager:
         successful_ports = []
         failed_ports = []
         
-        # Запускаем процессы параллельно
         with ThreadPoolExecutor(max_workers=min(len(configs_to_start), 10)) as executor:
             future_to_config = {
                 executor.submit(self._start_single_process, config): config
@@ -96,7 +75,6 @@ class TorPoolManager:
                     with self._lock:
                         self.failed_processes.add(port)
         
-        # Запускаем мониторинг если есть успешные процессы
         if successful_ports:
             self._start_monitoring()
         
@@ -111,19 +89,14 @@ class TorPoolManager:
         }
     
     def stop_all_processes(self):
-        """
-        Останавливает все процессы Tor.
-        """
         logger.info("Stopping all Tor processes...")
         
         self.is_running = False
         self._shutdown_event.set()
         
-        # Останавливаем мониторинг
         if self._monitoring_thread and self._monitoring_thread.is_alive():
             self._monitoring_thread.join(timeout=10)
         
-        # Останавливаем все процессы параллельно
         processes_to_stop = []
         with self._lock:
             processes_to_stop = list(self.processes.values())
@@ -138,7 +111,6 @@ class TorPoolManager:
                     except Exception as e:
                         logger.error(f"Error stopping process: {e}")
         
-        # Очищаем состояние
         with self._lock:
             self.processes.clear()
             self.running_processes.clear()
@@ -148,9 +120,6 @@ class TorPoolManager:
         logger.info("All Tor processes stopped")
     
     def stop_process(self, port: int) -> bool:
-        """
-        Останавливает конкретный процесс Tor.
-        """
         with self._lock:
             if port not in self.processes:
                 logger.warning(f"Process on port {port} not found")
@@ -175,18 +144,12 @@ class TorPoolManager:
             return False
     
     def get_process_status(self, port: int) -> Optional[Dict]:
-        """
-        Возвращает статус конкретного процесса.
-        """
         with self._lock:
             if port not in self.processes:
                 return None
             return self.processes[port].get_status()
     
     def get_all_statuses(self) -> List[Dict]:
-        """
-        Возвращает статусы всех процессов.
-        """
         statuses = []
         with self._lock:
             for process in self.processes.values():
@@ -194,19 +157,12 @@ class TorPoolManager:
         return statuses
     
     def check_process_health(self, port: int) -> bool:
-        """
-        Проверяет здоровье конкретного процесса.
-        Используется для определения запустился ли процесс.
-        """
         with self._lock:
             if port not in self.processes:
                 return False
             return self.processes[port].check_health()
     
     def restart_failed_processes(self) -> Dict[str, List[int]]:
-        """
-        Перезапускает неудачные процессы.
-        """
         failed_ports = []
         with self._lock:
             failed_ports = list(self.failed_processes)
@@ -217,7 +173,6 @@ class TorPoolManager:
         
         logger.info(f"Restarting {len(failed_ports)} failed processes")
         
-        # Создаем конфигурации для перезапуска
         restart_configs = []
         for port in failed_ports:
             with self._lock:
@@ -228,7 +183,6 @@ class TorPoolManager:
                         'exit_nodes': process.exit_nodes
                     })
         
-        # Очищаем неудачные процессы
         with self._lock:
             for port in failed_ports:
                 if port in self.processes:
@@ -236,34 +190,24 @@ class TorPoolManager:
                     del self.processes[port]
             self.failed_processes.clear()
         
-        # Запускаем заново
         return self.start_processes(restart_configs)
     
     def get_stats(self) -> Dict:
-        """
-        Возвращает общую статистику пула.
-        """
         with self._lock:
             return self.stats.copy()
     
     def _start_single_process(self, config: Dict) -> bool:
-        """
-        Запускает один процесс Tor.
-        """
         port = config['port']
         exit_nodes = config.get('exit_nodes', [])
         
         try:
             logger.info(f"Starting Tor process on port {port} with {len(exit_nodes)} exit nodes")
             
-            # Создаем процесс
             process = TorProcessManager(port, exit_nodes, self.config_builder)
             
-            # Сохраняем в пуле
             with self._lock:
                 self.processes[port] = process
             
-            # Запускаем
             success = process.start()
             
             if success:
@@ -284,9 +228,6 @@ class TorPoolManager:
             return False
     
     def _start_monitoring(self):
-        """
-        Запускает поток мониторинга процессов.
-        """
         if self._monitoring_thread and self._monitoring_thread.is_alive():
             return
         
@@ -299,9 +240,6 @@ class TorPoolManager:
         self._monitoring_thread.start()
     
     def _monitoring_loop(self):
-        """
-        Основной цикл мониторинга пула процессов.
-        """
         logger.debug("Started pool monitoring")
         
         while not self._shutdown_event.is_set() and self.is_running:
@@ -311,14 +249,11 @@ class TorPoolManager:
             except Exception as e:
                 logger.error(f"Error in pool monitoring loop: {e}")
             
-            self._shutdown_event.wait(30)  # проверка каждые 30 секунд
+            self._shutdown_event.wait(30)
         
         logger.debug("Stopped pool monitoring")
     
     def _check_process_health(self):
-        """
-        Проверяет здоровье всех процессов.
-        """
         dead_ports = []
         
         with self._lock:
@@ -329,16 +264,12 @@ class TorPoolManager:
                         logger.warning(f"Process on port {port} marked as dead "
                                      f"(failed checks: {process.failed_checks})")
         
-        # Перемещаем мертвые процессы в failed
         for port in dead_ports:
             with self._lock:
                 self.running_processes.discard(port)
                 self.failed_processes.add(port)
     
     def _update_stats(self):
-        """
-        Обновляет статистику пула.
-        """
         with self._lock:
             self.stats.update({
                 'total_processes': len(self.processes),

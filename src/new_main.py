@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-"""
-Главный файл для запуска рефакторенной системы Tor HTTP Proxy.
-
-Новая архитектура:
-1. TorConfigBuilder - создание конфигураций Tor
-2. TorProcessManager - управление одним процессом Tor с мониторингом IP каждые 5 секунд
-3. TorPoolManager - параллельный запуск максимум 20 процессов Tor
-4. ExitNodeValidator - проверка нод Steam запросами (6 запросов, успех если 3+ успешны)
-5. TorOrchestrator - координатор всей системы
-"""
 
 import os
 import sys
@@ -19,28 +9,22 @@ import threading
 
 from tor_orchestrator import TorOrchestrator
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-# Снижаем уровень логирования для внешних библиотек
 logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
 logging.getLogger('urllib3').setLevel(logging.WARNING)
 logging.getLogger('requests').setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-# Глобальные переменные для graceful shutdown
 orchestrator = None
 shutdown_event = threading.Event()
 
 
 def cleanup_temp_files():
-    """
-    Очищает временные файлы Tor.
-    """
     import glob
     import shutil
     
@@ -72,9 +56,6 @@ def cleanup_temp_files():
 
 
 def signal_handler(sig, frame):
-    """
-    Обработчик сигналов для graceful shutdown.
-    """
     logger.info(f"Received signal {sig}, shutting down...")
     shutdown_event.set()
     
@@ -86,21 +67,14 @@ def signal_handler(sig, frame):
 
 
 def setup_signal_handlers():
-    """
-    Настраивает обработчики сигналов.
-    """
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    # Для Unix-систем
     if hasattr(signal, 'SIGHUP'):
         signal.signal(signal.SIGHUP, signal_handler)
 
 
 def print_system_info():
-    """
-    Выводит информацию о системе и конфигурации.
-    """
     tor_processes = int(os.environ.get('TOR_PROCESSES', '20'))
     listen_port = int(os.environ.get('LISTEN_PORT', '8081'))
     validate_nodes = os.environ.get('VALIDATE_NODES', 'true').lower() == 'true'
@@ -119,18 +93,14 @@ def print_system_info():
 
 
 def monitor_system_status(orchestrator: TorOrchestrator):
-    """
-    Мониторит и выводит статус системы.
-    """
     logger.info("System monitoring started")
     
     last_status_time = 0
-    status_interval = 300  # Статус каждые 5 минут
+    status_interval = 300
     
     while not shutdown_event.is_set():
         current_time = time.time()
         
-        # Выводим статус каждые 5 минут
         if current_time - last_status_time >= status_interval:
             try:
                 status = orchestrator.get_system_status()
@@ -162,27 +132,19 @@ def monitor_system_status(orchestrator: TorOrchestrator):
 
 
 def main():
-    """
-    Главная функция приложения.
-    """
     global orchestrator
     
     try:
-        # Очищаем временные файлы
         cleanup_temp_files()
         
-        # Получаем конфигурацию
         tor_processes, listen_port, validate_nodes = print_system_info()
         
-        # Настраиваем обработчики сигналов
         setup_signal_handlers()
         
-        # Создаем оркестратор
         orchestrator = TorOrchestrator(listen_port=listen_port)
         
         logger.info("Starting Tor proxy system...")
         
-        # Запускаем систему
         if not orchestrator.start_system(tor_processes, validate_nodes=validate_nodes):
             logger.error("Failed to start Tor proxy system")
             sys.exit(1)
@@ -191,7 +153,6 @@ def main():
         logger.info(f"HTTP proxy available at: http://localhost:{listen_port}")
         logger.info("Press Ctrl+C to stop the system")
         
-        # Запускаем мониторинг в отдельном потоке
         monitor_thread = threading.Thread(
             target=monitor_system_status,
             args=(orchestrator,),
@@ -200,7 +161,6 @@ def main():
         monitor_thread.daemon = True
         monitor_thread.start()
         
-        # Ждем сигнала остановки
         while not shutdown_event.is_set():
             time.sleep(1)
         
@@ -213,7 +173,6 @@ def main():
         sys.exit(1)
         
     finally:
-        # Очищаем ресурсы
         if orchestrator:
             orchestrator.stop_system()
         

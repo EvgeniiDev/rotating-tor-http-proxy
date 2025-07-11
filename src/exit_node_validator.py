@@ -15,28 +15,20 @@ logger = logging.getLogger(__name__)
 
 
 class ExitNodeValidator:
-    """
-    Класс для проверки выходных нод Tor на пригодность для парсинга.
-    Отправляет 6 запросов на страницу Steam и считает ноду подходящей,
-    если 3 или больше запросов успешны.
-    """
     
     def __init__(self, config_builder: TorConfigBuilder, max_workers: int = 25):
         self.config_builder = config_builder
         self.max_workers = max_workers
         
-        # Параметры валидации
         self.test_url = "https://steamcommunity.com/market/search?appid=730"
         self.requests_per_node = 6
         self.min_successful_requests = 3
         self.request_timeout = 20
-        self.max_test_time = 1800  # 30 минут максимум
+        self.max_test_time = 1800
         
-        # Воркеры для тестирования
         self.test_workers: List[TorProcessManager] = []
         self._workers_lock = threading.Lock()
         
-        # Статистика
         self.stats = {
             'total_tested': 0,
             'successful_nodes': 0,
@@ -45,15 +37,6 @@ class ExitNodeValidator:
         }
         
     def validate_exit_nodes(self, exit_node_ips: List[str]) -> List[str]:
-        """
-        Проверяет список выходных нод на пригодность для парсинга Steam.
-        
-        Args:
-            exit_node_ips: Список IP адресов выходных нод
-            
-        Returns:
-            Список IP адресов нод, прошедших валидацию
-        """
         if not exit_node_ips:
             logger.warning("No exit nodes provided for validation")
             return []
@@ -61,16 +44,13 @@ class ExitNodeValidator:
         logger.info(f"Starting validation of {len(exit_node_ips)} exit nodes")
         start_time = time.time()
         
-        # Инициализируем воркеров
         if not self._initialize_workers():
             logger.error("Failed to initialize test workers")
             return []
         
         try:
-            # Проводим валидацию
             valid_nodes = self._validate_nodes_parallel(exit_node_ips, start_time)
             
-            # Обновляем статистику
             self.stats.update({
                 'total_tested': len(exit_node_ips),
                 'successful_nodes': len(valid_nodes),
@@ -90,9 +70,6 @@ class ExitNodeValidator:
             self._cleanup_workers()
     
     def get_validation_stats(self) -> Dict:
-        """
-        Возвращает статистику валидации.
-        """
         return {
             **self.stats,
             'max_workers': self.max_workers,
@@ -104,9 +81,6 @@ class ExitNodeValidator:
         }
     
     def _initialize_workers(self) -> bool:
-        """
-        Инициализирует пул воркеров для тестирования.
-        """
         with self._workers_lock:
             if self.test_workers:
                 logger.warning("Workers already initialized")
@@ -114,17 +88,14 @@ class ExitNodeValidator:
             
             logger.info(f"Initializing {self.max_workers} test workers...")
             
-            # Очищаем существующие процессы Tor на портах тестирования
             self._cleanup_existing_processes()
             
-            # Находим свободные порты
             start_port = 30100
             free_ports = self._find_free_ports(start_port, self.max_workers)
             
             if len(free_ports) < self.max_workers:
                 logger.warning(f"Only found {len(free_ports)} free ports out of {self.max_workers} needed")
             
-            # Создаем воркеров параллельно
             successful_workers = []
             with ThreadPoolExecutor(max_workers=min(len(free_ports), 10)) as executor:
                 future_to_port = {
@@ -149,9 +120,6 @@ class ExitNodeValidator:
             return len(self.test_workers) > 0
     
     def _cleanup_workers(self):
-        """
-        Очищает воркеров тестирования.
-        """
         with self._workers_lock:
             for worker in self.test_workers:
                 try:
@@ -163,9 +131,6 @@ class ExitNodeValidator:
             logger.debug("All test workers cleaned up")
     
     def _cleanup_existing_processes(self):
-        """
-        Убивает существующие процессы Tor на портах тестирования.
-        """
         try:
             subprocess.run(
                 ['pkill', '-f', 'tor.*3[0-9][0-9][0-9][0-9]'],
@@ -177,23 +142,17 @@ class ExitNodeValidator:
             pass
     
     def _find_free_ports(self, start_port: int, count: int) -> List[int]:
-        """
-        Находит свободные порты для воркеров.
-        """
         ports = []
         port = start_port
         
-        while len(ports) < count * 2 and port < start_port + 1000:  # ищем с запасом
+        while len(ports) < count * 2 and port < start_port + 1000:
             if self._is_port_free(port):
                 ports.append(port)
             port += 1
         
-        return ports[:count * 2]  # возвращаем с запасом
+        return ports[:count * 2]
     
     def _is_port_free(self, port: int) -> bool:
-        """
-        Проверяет, свободен ли порт.
-        """
         import socket
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
@@ -209,16 +168,10 @@ class ExitNodeValidator:
                 pass
     
     def _create_worker(self, port: int) -> Optional[TorProcessManager]:
-        """
-        Создает одного воркера для тестирования.
-        """
         try:
-            # Создаем воркера без выходных узлов (будем их менять динамически)
             worker = TorProcessManager(port, [], self.config_builder)
             
-            # Запускаем
             if worker.start():
-                # Ждем готовности
                 if self._wait_for_worker_ready(worker):
                     return worker
                 else:
@@ -231,9 +184,6 @@ class ExitNodeValidator:
             return None
     
     def _wait_for_worker_ready(self, worker: TorProcessManager, timeout: int = 30) -> bool:
-        """
-        Ожидает готовности воркера.
-        """
         start_time = time.time()
         
         while time.time() - start_time < timeout:
@@ -248,15 +198,11 @@ class ExitNodeValidator:
         return False
     
     def _validate_nodes_parallel(self, exit_node_ips: List[str], start_time: float) -> List[str]:
-        """
-        Валидирует ноды параллельно с использованием воркеров.
-        """
         valid_nodes = []
         tested_count = 0
         lock = threading.Lock()
         progress_lock = threading.Lock()
         
-        # Создаем очередь с нодами для тестирования
         node_queue = Queue()
         for node_ip in exit_node_ips:
             node_queue.put(node_ip)
@@ -268,12 +214,10 @@ class ExitNodeValidator:
                 try:
                     node_ip = node_queue.get(timeout=2)
                 except:
-                    break  # Очередь пуста
+                    break
                 
                 try:
-                    # Переключаем воркера на тестируемую ноду
                     if self._configure_worker_for_node(worker, node_ip):
-                        # Тестируем ноду
                         if self._test_node_with_steam_requests(worker, node_ip):
                             with lock:
                                 valid_nodes.append(node_ip)
@@ -291,7 +235,6 @@ class ExitNodeValidator:
                 finally:
                     node_queue.task_done()
         
-        # Запускаем потоки тестирования
         threads = []
         for i, worker in enumerate(self.test_workers):
             thread = threading.Thread(
@@ -303,26 +246,18 @@ class ExitNodeValidator:
             thread.start()
             threads.append(thread)
         
-        # Ждем завершения всех задач
         node_queue.join()
         
-        # Ждем завершения потоков
         for thread in threads:
             thread.join(timeout=5)
         
         return valid_nodes
     
     def _configure_worker_for_node(self, worker: TorProcessManager, node_ip: str) -> bool:
-        """
-        Конфигурирует воркера для использования конкретной выходной ноды.
-        """
         try:
-            # Перезагружаем воркера с новой выходной нодой
             if worker.reload_exit_nodes([node_ip]):
-                # Ждем применения конфигурации
                 time.sleep(2)
                 
-                # Проверяем, что соединение работает
                 return self._wait_for_worker_ready(worker, timeout=10)
             
             return False
@@ -332,10 +267,6 @@ class ExitNodeValidator:
             return False
     
     def _test_node_with_steam_requests(self, worker: TorProcessManager, node_ip: str) -> bool:
-        """
-        Тестирует ноду с помощью запросов к Steam.
-        Отправляет 6 запросов и считает ноду валидной если 3+ успешны.
-        """
         successful_requests = 0
         
         for request_num in range(self.requests_per_node):
@@ -352,7 +283,6 @@ class ExitNodeValidator:
                 if response.status_code == 200:
                     successful_requests += 1
                     
-                    # Если уже достигли минимума, можно прекратить тестирование
                     if successful_requests >= self.min_successful_requests:
                         logger.info(f"Node {node_ip} PASSED early: "
                                   f"{successful_requests}/{request_num + 1} requests successful")
@@ -362,7 +292,6 @@ class ExitNodeValidator:
                 logger.debug(f"Request {request_num + 1} failed for node {node_ip}: {e}")
                 continue
         
-        # Определяем результат
         is_valid = successful_requests >= self.min_successful_requests
         status = "PASSED" if is_valid else "FAILED"
         
