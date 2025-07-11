@@ -7,88 +7,67 @@ import time
 import threading
 
 from http_load_balancer import HTTPLoadBalancer
-from tor_pool_manager import TorPoolManager
-from config_manager import ConfigManager
+from tor_pool_manager import TorBalancerManager
+from config_manager import TorConfigBuilder
+from tor_parallel_runner import TorParallelRunner
+from exit_node_tester import ExitNodeChecker
 from tor_relay_manager import TorRelayManager
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
-logging.getLogger('urllib3').setLevel(logging.WARNING)
-
-logger = logging.getLogger(__name__)
-shutdown_event = threading.Event()
-
-def cleanup_temp_files():
-    import glob
-    import shutil
+def main():
+    print("Starting Tor HTTP Proxy with new architecture...")
     
-    data_dir = os.path.expanduser('~/tor-http-proxy/data')
-    if not os.path.exists(data_dir):
-        return
+    # Создаём компоненты новой архитектуры
+    config_builder = TorConfigBuilder()
+    checker = ExitNodeChecker(test_requests_count=3, required_success_count=2, timeout=10)  # Упрощаем тесты
+    runner = TorParallelRunner(config_builder)
+    balancer = HTTPLoadBalancer(listen_port=8080)
+    manager = TorBalancerManager(config_builder, checker, runner, balancer)
     
     try:
-        temp_patterns = [
-            os.path.join(data_dir, 'data_*'),
-            os.path.join(data_dir, 'torrc.*'),
-            '/tmp/tor_*'
+        # Используем fallback exit-ноды для быстрого тестирования
+        print("Using fallback exit nodes for testing...")
+        exit_nodes = [
+            "185.220.100.240",
+            "185.220.100.241", 
+            "185.220.100.242",
+            "95.216.143.131",
+            "185.220.102.4"
         ]
+        print(f"Testing {len(exit_nodes)} exit nodes")
         
-        for pattern in temp_patterns:
-            for path in glob.glob(pattern):
-                try:
-                    if os.path.isdir(path):
-                        shutil.rmtree(path)
-                    else:
-                        os.unlink(path)
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
-def main():    
-    cleanup_temp_files()
-    
-    tor_processes = int(os.environ.get('TOR_PROCESSES', '50'))
-    
-    logger.info("Запуск Rotating Tor HTTP Proxy")
-    logger.info(f"Количество Tor процессов: {tor_processes}")
-    
-    config_manager = ConfigManager()
-    relay_manager = TorRelayManager()
-    
-    http_balancer = HTTPLoadBalancer(listen_port=8081)
-    http_balancer.start()
-    
-    tor_pool = TorPoolManager(
-        config_manager=config_manager,
-        load_balancer=http_balancer,
-        relay_manager=relay_manager
-    )
-    
-    if not tor_pool.start(tor_processes, test_nodes=True):
-        logger.error("Не удалось запустить пул Tor процессов")
-        sys.exit(1)
-    
-    logger.info("HTTP прокси доступен по адресу: http://localhost:8081")
-    logger.info("Сервисы запущены. Нажмите Ctrl+C для остановки.")
-
-    def signal_handler(sig, frame):
-        shutdown_event.set()
-        if http_balancer:
-            http_balancer.stop()
-        if tor_pool:
-            tor_pool.stop()
-        sys.exit(0)
+        # Запускаем пул с 2 процессами для тестирования
+        print("Starting Tor pool with 2 processes...")
+        success = manager.run_pool(count=2, exit_nodes=exit_nodes)
         
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    while not shutdown_event.is_set():
-        time.sleep(1)
+        if success:
+            print("✅ Pool started successfully!")
+            print(f"🌐 HTTP proxy is running on http://localhost:8080")
+            
+            # Получаем статистику
+            stats = manager.get_stats()
+            print(f"📊 Pool stats: {stats}")
+            
+            print("🔄 Proxy is ready! Test with:")
+            print("   curl -x http://localhost:8080 https://httpbin.org/ip")
+            print("")
+            print("⏱️  Running for 30 seconds... (Press Ctrl+C to stop)")
+            time.sleep(30)
+            
+        else:
+            print("❌ Failed to start pool")
+            
+    except KeyboardInterrupt:
+        print("\n🛑 Shutting down...")
+    except Exception as e:
+        print(f"❌ Error: {e}")
+    finally:
+        manager.stop()
+        print("✅ Pool stopped")
 
 if __name__ == "__main__":
     main()

@@ -1,45 +1,27 @@
 import os
-from typing import Dict, List
+from typing import List
 from utils import is_valid_ipv4
 
+class TorConfigBuilder:
+    """
+    Отвечает только за генерацию конфигураций Tor.
+    """
+    def __init__(self, data_dir: str = '~/tor-http-proxy/data'):
+        self.data_dir = os.path.expanduser(data_dir)
 
-class ConfigManager:
-    __slots__ = ('data_dir',)
-    
-    def __init__(self):
-        self.data_dir = os.path.expanduser('~/tor-http-proxy/data')
-        
-    def create_tor_config_by_port(self, socks_port: int, exit_nodes: List[str]) -> Dict:
-        if not exit_nodes:
-            raise ValueError("Exit nodes list is required for Tor configuration")
-        
-        config_content = self.get_tor_config_by_port(socks_port, exit_nodes)
-        config_path = os.path.join(self.data_dir, f'torrc.{socks_port}')
-        
-        os.makedirs(self.data_dir, exist_ok=True)
-        with open(config_path, 'w') as f:
-            f.write(config_content)
-        os.chmod(config_path, 0o644)
-
-        return {
-            'config_path': config_path,
-            'socks_port': socks_port,
-            'exit_nodes_count': len(exit_nodes)
-        }
-
-    def get_tor_config_by_port(self, socks_port: int, exit_nodes: List[str]) -> str:
-        if not exit_nodes:
-            raise ValueError("Exit nodes list is required for Tor configuration")
-        
+    def build_config(self, socks_port: int, exit_nodes: List[str]) -> str:
         ipv4_nodes = [ip for ip in exit_nodes if is_valid_ipv4(ip)]
         if not ipv4_nodes:
             raise ValueError("No valid IPv4 exit nodes provided")
-        
         exit_nodes_str = ','.join(ipv4_nodes)
+        
+        # Создаём директорию для данных
+        data_path = f"{self.data_dir}/data_{socks_port}"
+        os.makedirs(data_path, exist_ok=True)
         
         config_lines = [
             f"SocksPort 127.0.0.1:{socks_port}",
-            f"DataDirectory {self.data_dir}/data_{socks_port}",
+            f"DataDirectory {data_path}",
             "MaxCircuitDirtiness 10",
             "NewCircuitPeriod 10",
             "ExitRelay 0",
@@ -51,18 +33,21 @@ class ConfigManager:
             "LearnCircuitBuildTimeout 0",
             "CircuitBuildTimeout 10",
             f"ExitNodes {exit_nodes_str}",
-            "StrictNodes 1", # disallow to use other exit nodes. I think it doesn't work
-            "EnforceDistinctSubnets 0", # allow to use exit ip from same subnet (/16)
+            "StrictNodes 1",
+            "EnforceDistinctSubnets 0",
         ]
-        
         return '\n'.join(config_lines)
 
-    def get_tor_config_without_exit_nodes(self, socks_port: int) -> str:
+    def build_config_without_exit_nodes(self, socks_port: int) -> str:
+        # Создаём директорию для данных
+        data_path = f"{self.data_dir}/data_{socks_port}"
+        os.makedirs(data_path, exist_ok=True)
+        
         config_lines = [
             f"SocksPort 127.0.0.1:{socks_port}",
-            f"DataDirectory {self.data_dir}/data_{socks_port}",
+            f"DataDirectory {data_path}",
             "MaxCircuitDirtiness 10",
-            "NewCircuitPeriod 10", 
+            "NewCircuitPeriod 10",
             "ExitRelay 0",
             "ClientOnly 1",
             "UseMicrodescriptors 1",
@@ -71,5 +56,4 @@ class ConfigManager:
             "LearnCircuitBuildTimeout 0",
             "CircuitBuildTimeout 10",
         ]
-        
         return '\n'.join(config_lines)
