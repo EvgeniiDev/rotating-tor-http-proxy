@@ -18,7 +18,7 @@ from http_load_balancer import TorBalancerManager
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
 logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
@@ -96,13 +96,39 @@ def main():
         time.sleep(1)
 
 if __name__ == "__main__":
-    # Пример использования новой архитектуры
+    # Создаём компоненты новой архитектуры
     config_builder = TorConfigBuilder()
     checker = ExitNodeChecker()
     runner = TorParallelRunner(config_builder)
-    balancer = None  # Здесь должен быть ваш балансировщик
+    balancer = HTTPLoadBalancer(listen_port=8080)
     manager = TorBalancerManager(config_builder, checker, runner, balancer)
 
-    # Пример: получить список exit-нод (заглушка)
-    exit_nodes = ["1.2.3.4", "5.6.7.8", "9.10.11.12"]
-    manager.run_pool(count=3, exit_nodes=exit_nodes)
+    try:
+        # Пример: получить список exit-нод (заглушка)
+        exit_nodes = ["1.2.3.4", "5.6.7.8", "9.10.11.12"]
+        
+        # Запускаем пул с 3 процессами
+        success = manager.run_pool(count=3, exit_nodes=exit_nodes)
+        
+        if success:
+            print("Pool started successfully!")
+            
+            # Получаем статистику
+            stats = manager.get_stats()
+            print(f"Pool stats: {stats}")
+            
+            # Работаем некоторое время
+            time.sleep(30)
+            
+            # Перераспределяем при необходимости
+            manager.redistribute()
+            
+            # Останавливаем
+            manager.stop()
+            print("Pool stopped")
+        else:
+            print("Failed to start pool")
+            
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+        manager.stop()
