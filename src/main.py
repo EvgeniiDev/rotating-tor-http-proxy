@@ -10,6 +10,11 @@ from http_load_balancer import HTTPLoadBalancer
 from tor_pool_manager import TorPoolManager
 from config_manager import ConfigManager
 from tor_relay_manager import TorRelayManager
+from config_manager import TorConfigBuilder
+from tor_process import TorInstance
+from parallel_worker_manager import TorParallelRunner
+from exit_node_tester import ExitNodeChecker
+from http_load_balancer import TorBalancerManager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -91,4 +96,13 @@ def main():
         time.sleep(1)
 
 if __name__ == "__main__":
-    main()
+    # Пример использования новой архитектуры
+    config_builder = TorConfigBuilder()
+    checker = ExitNodeChecker()
+    runner = TorParallelRunner(config_builder)
+    balancer = None  # Здесь должен быть ваш балансировщик
+    manager = TorBalancerManager(config_builder, checker, runner, balancer)
+
+    # Пример: получить список exit-нод (заглушка)
+    exit_nodes = ["1.2.3.4", "5.6.7.8", "9.10.11.12"]
+    manager.run_pool(count=3, exit_nodes=exit_nodes)

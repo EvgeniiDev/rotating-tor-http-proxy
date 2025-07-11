@@ -103,3 +103,28 @@ class HTTPLoadBalancer:
 
     def is_running(self) -> bool:
         return self.proxy_balancer is not None
+
+
+class TorBalancerManager:
+    """
+    Получает пригодные exit-ноды, запускает заданное число Tor-процессов, распределяет exit-ноды и добавляет их в балансировщик.
+    """
+    def __init__(self, config_builder, checker, runner, balancer):
+        self.config_builder = config_builder
+        self.checker = checker
+        self.runner = runner
+        self.balancer = balancer
+
+    def run_pool(self, count: int, exit_nodes: list):
+        # 1. Проверить exit-ноды через checker
+        # 2. Запустить runner с подходящими exit-нодами
+        # 3. Добавить их в балансировщик
+        pass
+
+    def redistribute(self):
+        # Перераспределить exit-ноды между процессами
+        pass
+
+    def get_stats(self):
+        # Получить статистику по пулу
+        pass
