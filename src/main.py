@@ -44,7 +44,7 @@ def main():
             relay_data = relay_manager.fetch_tor_relays()
             if relay_data:
                 all_exit_nodes = relay_manager.extract_relay_ips(relay_data)
-                max_nodes = tor_count * 6 * 2
+                max_nodes = tor_count * 6
                 limited_nodes = all_exit_nodes[:max_nodes]
                 exit_nodes = [node['ip'] for node in limited_nodes]
                 print(f"Found {len(all_exit_nodes)} total exit nodes, using {len(exit_nodes)} (limit: {max_nodes})")
