@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import threading
 import time
@@ -8,6 +7,7 @@ from utils import safe_stop_thread
 
 from tor_process import TorProcess
 from exit_node_tester import ExitNodeTester
+from parallel_worker_manager import ParallelWorkerManager
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ class TorPoolManager:
         'config_manager', 'load_balancer', 'relay_manager', 'exit_node_tester', 'instances',
         'added_to_balancer', 'next_port', 'running', '_lock', '_cleanup_thread',
         '_shutdown_event', 'stats', 'global_suspicious_nodes', 
-        'global_blacklisted_nodes'
+        'global_blacklisted_nodes', 'parallel_manager'
     )
     
     def __init__(self, config_manager, load_balancer, relay_manager):
@@ -25,8 +25,8 @@ class TorPoolManager:
         self.load_balancer = load_balancer
         self.relay_manager = relay_manager
         
-        # Инициализируем тестер выходных узлов
         self.exit_node_tester = ExitNodeTester(config_manager)
+        self.parallel_manager = ParallelWorkerManager(port_start=10000)
         
         self.instances: Dict[int, TorProcess] = {}
         self.added_to_balancer: set = set()
@@ -117,16 +117,16 @@ class TorPoolManager:
         processes_with_nodes = sum(1 for d in node_distributions.values() if d.get('exit_nodes'))
         logger.info(f"Created initial node distributions for {processes_with_nodes}/{instance_count} processes")
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # Initial attempt
+        successful_instances, failed_ids = self.parallel_manager.create_instances_with_nodes(
+            self.config_manager, node_distributions, self.instances, 
+            self.load_balancer, self.added_to_balancer, self.next_port
+        )
         
-        try:
-            failed_ids = loop.run_until_complete(
-                self._create_instances_async(node_distributions, max_concurrent)
-            )
+        self.next_port += len(node_distributions)
 
-            # Retry logic
-            for attempt in range(max_retries):
+        # Retry logic
+        for attempt in range(max_retries):
                 if not failed_ids:
                     break
                 
@@ -159,12 +159,12 @@ class TorPoolManager:
                     for i, original_id in enumerate(failed_ids)
                 }
 
-                failed_ids = loop.run_until_complete(
-                    self._create_instances_async(mapped_retry_distributions, max_concurrent)
+                retry_successful, failed_ids = self.parallel_manager.create_instances_with_nodes(
+                    self.config_manager, mapped_retry_distributions, self.instances,
+                    self.load_balancer, self.added_to_balancer, self.next_port
                 )
-
-        finally:
-            loop.close()
+                
+                self.next_port += len(mapped_retry_distributions)
 
         with self._lock:
             final_count = len(self.instances)
@@ -179,71 +179,7 @@ class TorPoolManager:
         logger.info(f"Pool started successfully with {final_count}/{instance_count} instances.")
         return True
 
-    async def _create_instances_async(
-        self, 
-        node_distributions: Dict[int, Dict], 
-        max_concurrent: int
-    ) -> List[int]:
-        if not node_distributions:
-            return []
 
-        logger.info(f"Starting parallel creation of {len(node_distributions)} Tor instances with max_concurrent={max_concurrent}")
-        semaphore = asyncio.Semaphore(max_concurrent)
-        tasks = []
-        
-        for process_id, dist_data in node_distributions.items():
-            exit_nodes = dist_data.get('exit_nodes', [])
-            if not exit_nodes:
-                logger.warning(f"Skipping instance {process_id} due to no assigned exit nodes.")
-                continue
-            
-            task = self._create_single_instance(semaphore, process_id, exit_nodes)
-            tasks.append(task)
-            
-        logger.info(f"Created {len(tasks)} tasks for parallel execution")
-        results = await asyncio.gather(*tasks)
-        
-        failed_ids = [result for result in results if result is not None]
-        
-        successful_count = len(node_distributions) - len(failed_ids)
-        logger.info(f"Parallel instance creation completed: {successful_count}/{len(node_distributions)} successful, {len(failed_ids)} failed")
-        
-        return failed_ids
-
-    async def _create_single_instance(self, semaphore: asyncio.Semaphore, process_id: int, exit_nodes: List[str]) -> Optional[int]:
-        async with semaphore:
-            port = self.next_port
-            self.next_port += 1
-            
-            logger.info(f"[{process_id}] Starting creation of Tor process on port {port} with {len(exit_nodes)} exit nodes")
-            
-            instance = TorProcess(
-                port=port,
-                exit_nodes=exit_nodes
-            )
-
-            if not instance.create_config(self.config_manager):
-                logger.error(f"[{process_id}] Tor process on port {port} failed to create config")
-                return process_id
-                
-            if not instance.start_process():
-                logger.error(f"[{process_id}] Tor process on port {port} failed to start")
-                return process_id
-                
-            if not await self._wait_for_startup_async(instance):
-                logger.error(f"[{process_id}] Tor process on port {port} failed to start properly")
-                instance.stop_process()
-                instance.cleanup()
-                return process_id
-
-            instance.is_running = True
-
-            logger.info(f"[{process_id}] Tor process on port {port} started successfully")
-            with self._lock:
-                self.instances[port] = instance
-                self.load_balancer.add_proxy(port)
-                self.added_to_balancer.add(port)
-            return None
 
     def stop(self):
         with self._lock:
@@ -258,13 +194,7 @@ class TorPoolManager:
                 
             instances_to_stop = list(self.instances.values())
             
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        try:
-            loop.run_until_complete(self._stop_instances_async(instances_to_stop))
-        finally:
-            loop.close()
+        self._stop_instances_sync(instances_to_stop)
             
         with self._lock:         
             self.instances.clear()
@@ -274,7 +204,7 @@ class TorPoolManager:
             
         self._update_stats()
 
-    async def _stop_instances_async(self, instances_to_stop: List[TorProcess]):
+    def _stop_instances_sync(self, instances_to_stop: List[TorProcess]):
         if not instances_to_stop:
             return
         logger.info(f"Stopping {len(instances_to_stop)} Tor instances...")
@@ -336,23 +266,7 @@ class TorPoolManager:
         logger.warning(f"Tor process on port {instance.port} failed to start within {timeout}s")
         return False
 
-    async def _wait_for_startup_async(self, instance: TorProcess, timeout: int = 60) -> bool:
-        logger.info(f"Waiting for Tor process on port {instance.port} to start up...")
-        start_time = time.time()
 
-        while time.time() - start_time < timeout:
-            if instance.process and instance.process.poll() is not None:
-                logger.error(f"Tor process on port {instance.port} died during startup")
-                return False
-
-            if instance.test_connection():
-                logger.info(f"Tor process on port {instance.port} is ready")
-                return True
-
-            await asyncio.sleep(2)
-
-        logger.warning(f"Tor process on port {instance.port} failed to start within {timeout}s")
-        return False
 
     def _remove_instance(self, port: int):
         with self._lock:
@@ -363,13 +277,7 @@ class TorPoolManager:
                 
         self._remove_from_load_balancer(port)
         
-    def _get_next_port(self) -> int:
-        with self._lock:
-            while self.next_port in self.instances:
-                self.next_port += 1
-            port = self.next_port
-            self.next_port += 1
-            return port
+
             
     def _add_to_load_balancer(self, port: int):
         if port not in self.added_to_balancer:
@@ -502,11 +410,6 @@ class TorPoolManager:
             self.stats['running_instances'] = sum(1 for instance in self.instances.values() if instance.is_running)
             self.stats['last_update'] = datetime.now()
 
-    def _stop_single_instance(self, instance):
-        instance.is_running = False
-        instance.stop_process()
-        instance.cleanup()
-    
     def _get_exit_node_global_stats(self) -> dict:
         with self._lock:
             total_tracked = total_active = total_inactive = 0
@@ -529,24 +432,6 @@ class TorPoolManager:
                 'global_suspicious_count': len(self.global_suspicious_nodes),
                 'global_blacklisted_count': len(self.global_blacklisted_nodes)
             }
-
-    def blacklist_exit_node_globally(self, ip: str):
-        with self._lock:
-            self.global_blacklisted_nodes.add(ip)
-            self.global_suspicious_nodes.discard(ip)
-            
-            for instance in self.instances.values():
-                instance.blacklist_exit_node(ip)
-            
-            logger.warning(f"Exit node {ip} blacklisted globally across all instances")
-
-    def get_global_suspicious_nodes(self) -> List[str]:
-        with self._lock:
-            return list(self.global_suspicious_nodes)
-
-    def get_global_blacklisted_nodes(self) -> List[str]:
-        with self._lock:
-            return list(self.global_blacklisted_nodes)
 
     def _update_global_exit_node_monitoring(self):
         with self._lock:
@@ -617,37 +502,8 @@ class TorPoolManager:
             if redistributed_count > 0:
                 logger.info(f"Completed redistribution for {redistributed_count} instances")
                 
-    def _add_all_instances_to_balancer(self):
-        with self._lock:
-            added_count = 0
-            total_running = 0
-            
-            for port, instance in self.instances.items():
-                if instance.is_running:
-                    total_running += 1
-                    if port not in self.added_to_balancer:
-                        self.load_balancer.add_proxy(port)
-                        self.added_to_balancer.add(port)
-                        added_count += 1
-            
-            logger.info(f"Added {added_count} instances to load balancer")
-            logger.info(f"Status: {total_running} total running, {len(self.added_to_balancer)} in balancer")
 
-    def test_exit_nodes(self, exit_nodes: List[str]) -> List[str]:
-        """
-        Тестирует выходные узлы и возвращает только рабочие.
-        
-        Args:
-            exit_nodes: Список IP-адресов узлов для тестирования
-            
-        Returns:
-            Список рабочих узлов
-        """
-        logger.info(f"Starting exit node testing for {len(exit_nodes)} nodes")
-        working_nodes = self.exit_node_tester.test_and_filter_nodes(exit_nodes)
-        logger.info(f"Exit node testing completed: {len(working_nodes)}/{len(exit_nodes)} nodes passed")
-        return working_nodes
-    
+
     def test_and_update_instance_nodes(self, port: int) -> bool:
         """
         Тестирует узлы конкретного экземпляра и обновляет их при необходимости.
@@ -709,33 +565,7 @@ class TorPoolManager:
                 
         return False
     
-    def test_all_instances_nodes(self) -> Dict[int, bool]:
-        """
-        Тестирует узлы всех экземпляров и обновляет их при необходимости.
-        
-        Returns:
-            Словарь с результатами обновления для каждого порта
-        """
-        results = {}
-        
-        with self._lock:
-            for port in list(self.instances.keys()):
-                try:
-                    results[port] = self.test_and_update_instance_nodes(port)
-                except Exception as e:
-                    logger.error(f"Error testing nodes for instance {port}: {e}")
-                    results[port] = False
-        
-        successful_updates = sum(1 for success in results.values() if success)
-        logger.info(f"Completed testing all instances: {successful_updates}/{len(results)} successful updates")
-        
-        return results
-    
-    def get_exit_node_tester_stats(self) -> Dict:
-        """
-        Возвращает статистику тестера выходных узлов.
-        
-        Returns:
-            Словарь со статистикой тестирования
-        """
-        return self.exit_node_tester.get_test_stats()
+
+
+    def test_exit_nodes(self, exit_nodes: List[str]) -> List[str]:
+        return self.exit_node_tester.test_exit_nodes(exit_nodes)

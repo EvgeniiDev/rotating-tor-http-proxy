@@ -114,19 +114,13 @@ class TorProcess:
         data_dir = os.path.expanduser(f'~/tor-http-proxy/data/data_{self.port}')
         if os.path.exists(data_dir):
             import shutil
-            try:
-                shutil.rmtree(data_dir)
-            except Exception:
-                pass
+            shutil.rmtree(data_dir, ignore_errors=True)
 
     def test_connection(self) -> bool:
-        for i, url in enumerate(TEST_URLS):
-            try:
-                response = self._make_request(url)
-                if response:
-                    return True
-            except Exception as e:
-                continue
+        for url in TEST_URLS:
+            response = self._make_request(url)
+            if response:
+                return True
         return False
 
     def check_health(self) -> bool:
