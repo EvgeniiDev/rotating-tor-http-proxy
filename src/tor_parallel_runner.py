@@ -4,7 +4,12 @@ from tor_process import TorInstance
 
 class TorParallelRunner:
     """
-    Отвечает за параллельный запуск и мониторинг до 20 процессов Tor.
+    Отвечает за параллельный запуск и управление множественными процессами Tor.
+    
+    Логика:
+    - Запускает несколько Tor процессов одновременно через threading
+    - Управляет жизненным циклом каждого процесса (старт/стоп/рестарт)
+    - Предоставляет thread-safe доступ к статусам всех процессов
     """
     def __init__(self, config_builder, max_concurrent: int = 20):
         self.config_builder = config_builder

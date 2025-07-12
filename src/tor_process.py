@@ -11,7 +11,13 @@ import requests
 
 class TorInstance:
     """
-    Отвечает только за управление одним процессом Tor и мониторинг его здоровья.
+    Отвечает за управление одним процессом Tor и мониторинг его состояния.
+    
+    Логика:
+    - Создает конфигурацию и запускает/останавливает процесс Tor
+    - Проверяет здоровье процесса через SOCKS соединение
+    - Поддерживает горячую перезагрузку exit-нод через SIGHUP без перезапуска
+    - Отслеживает IP адрес выхода и количество ошибок
     """
     def __init__(self, port: int, exit_nodes: List[str], config_builder):
         self.port = port
@@ -124,4 +130,7 @@ class TorInstance:
             return False
             
         except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Reconfiguration failed for port {self.port}: {e}")
             return False

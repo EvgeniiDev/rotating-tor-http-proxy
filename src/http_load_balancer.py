@@ -6,6 +6,15 @@ from proxy_load_balancer import ProxyBalancer, StatsReporter
 logger = logging.getLogger(__name__)
 
 class HTTPLoadBalancer:
+    """
+    Отвечает за HTTP прокси сервер с распределением нагрузки между Tor процессами.
+    
+    Логика:
+    - Принимает HTTP запросы и перенаправляет их через доступные Tor прокси
+    - Управляет списком активных прокси (добавление/удаление)
+    - Использует round-robin алгоритм для равномерного распределения запросов
+    - Мониторит состояние прокси и автоматически исключает неработающие
+    """
     __slots__ = (
         'listen_port', 'proxy_balancer', 'proxy_monitor', '_lock',
         'config', 'proxy_ports'

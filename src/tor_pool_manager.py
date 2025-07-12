@@ -5,8 +5,13 @@ logger = logging.getLogger(__name__)
 
 class TorBalancerManager:
     """
-    Интеграционный класс: управляет тестированием exit-нод, запуском TorParallelRunner,
-    добавлением портов в HTTPLoadBalancer и мониторингом состояния.
+    Координирует работу всего пула Tor процессов с HTTP балансировщиком.
+    
+    Логика:
+    - Тестирует exit-ноды через ExitNodeChecker
+    - Запускает рабочие Tor процессы через TorParallelRunner  
+    - Регистрирует прокси в HTTPLoadBalancer для распределения нагрузки
+    - Мониторит состояние пула и обеспечивает автоматическое восстановление
     """
     def __init__(self, config_builder, checker, runner, http_balancer):
         self.config_builder = config_builder
@@ -20,21 +25,31 @@ class TorBalancerManager:
             logger.warning("No exit nodes provided")
             return False
             
-        logger.info(f"Testing exit nodes in parallel...")
+        logger.info(f"Starting pool with {count} processes using {len(exit_nodes)} exit nodes...")
+        
+        # Test more nodes than needed to have backup options
+        nodes_to_test = min(len(exit_nodes), count * 3)
+        logger.info(f"Testing {nodes_to_test} exit nodes to find {count} working nodes...")
         
         working_nodes = self.checker.test_exit_nodes_parallel(
-            exit_nodes[:count * 2], count
+            exit_nodes[:nodes_to_test], count
         )
         
         if not working_nodes:
             logger.error("No working exit nodes found after testing")
             return False
             
+        if len(working_nodes) < count:
+            logger.warning(f"Found only {len(working_nodes)} working nodes, requested {count}. Will use {len(working_nodes)} processes.")
+            
         logger.info(f"Found {len(working_nodes)} working exit nodes")
 
-        ports = [9050 + i for i in range(min(count, len(working_nodes)))]
-        exit_nodes_for_runner = [[node] for node in working_nodes[:len(ports)]]
+        # Create exactly as many ports as we have working nodes
+        actual_count = min(count, len(working_nodes))
+        ports = [9050 + i for i in range(actual_count)]
+        exit_nodes_for_runner = [[node] for node in working_nodes[:actual_count]]
         
+        logger.info(f"Starting {actual_count} Tor processes on ports {ports[0]}-{ports[-1]}...")
         self.runner.start_many(ports, exit_nodes_for_runner)
         
         with self._lock:

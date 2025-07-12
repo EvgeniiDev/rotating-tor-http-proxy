@@ -6,6 +6,14 @@ from utils import is_valid_ipv4
 logger = logging.getLogger(__name__)
 
 class TorRelayManager:
+    """
+    Отвечает за получение списка Tor релеев и извлечение exit-нод.
+    
+    Логика:
+    - Загружает данные о Tor релеях из официальных источников
+    - Фильтрует и валидирует exit-ноды по критериям (IPv4, политика выхода)
+    - Предоставляет списки exit-нод для распределения между Tor процессами
+    """
     __slots__ = ('current_relays', 'exit_nodes_by_probability')
     
     def __init__(self):

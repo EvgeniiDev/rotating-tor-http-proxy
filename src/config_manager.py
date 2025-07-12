@@ -4,7 +4,12 @@ from utils import is_valid_ipv4
 
 class TorConfigBuilder:
     """
-    Отвечает только за генерацию конфигураций Tor.
+    Отвечает за генерацию конфигурационных файлов для Tor процессов.
+    
+    Логика:
+    - Создает конфигурацию Tor с заданными портами и exit-нодами
+    - Валидирует параметры (IPv4 адреса, порты)
+    - Генерирует временные файлы конфигурации для каждого процесса
     """
     def __init__(self, data_dir: str = '~/tor-http-proxy/data'):
         self.data_dir = os.path.expanduser(data_dir)
@@ -15,7 +20,6 @@ class TorConfigBuilder:
             raise ValueError("No valid IPv4 exit nodes provided")
         exit_nodes_str = ','.join(ipv4_nodes)
         
-        # Создаём директорию для данных
         data_path = f"{self.data_dir}/data_{socks_port}"
         os.makedirs(data_path, exist_ok=True)
         
