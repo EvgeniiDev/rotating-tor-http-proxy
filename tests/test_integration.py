@@ -82,6 +82,37 @@ class TestIntegration(unittest.TestCase):
         except requests.exceptions.RequestException as e:
             self.fail(f"Failed to make request through proxy: {e}")
 
+    def test_module_api_compatibility_in_runtime(self):
+        from exit_node_tester import ExitNodeChecker
+        from tor_pool_manager import TorBalancerManager
+        from config_manager import TorConfigBuilder
+        from unittest.mock import Mock
+        
+        config_builder = TorConfigBuilder()
+        checker = ExitNodeChecker(config_builder=config_builder)
+        
+        required_methods = ['test_exit_nodes_parallel', 'test_node', 'test_nodes']
+        for method in required_methods:
+            self.assertTrue(hasattr(checker, method),
+                           f"ExitNodeChecker missing method: {method}")
+        
+        deprecated_methods = ['test_nodes_with_temp_instances']
+        for method in deprecated_methods:
+            self.assertFalse(hasattr(checker, method),
+                           f"ExitNodeChecker should not have deprecated method: {method}")
+        
+        mock_balancer = Mock()
+        mock_runner = Mock()
+        pool_manager = TorBalancerManager(
+            config_builder=config_builder,
+            checker=checker,
+            runner=mock_runner,
+            http_balancer=mock_balancer
+        )
+        
+        self.assertTrue(hasattr(pool_manager.checker, 'test_exit_nodes_parallel'),
+                       "TorBalancerManager checker should have test_exit_nodes_parallel method")
+
 
 if __name__ == '__main__':
     unittest.main()

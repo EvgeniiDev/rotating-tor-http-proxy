@@ -22,7 +22,7 @@ class TorBalancerManager:
             
         logger.info(f"Testing exit nodes in parallel...")
         
-        working_nodes = self.checker.test_nodes_with_temp_instances(
+        working_nodes = self.checker.test_exit_nodes_parallel(
             exit_nodes[:count * 2], count
         )
         
@@ -70,7 +70,7 @@ class TorBalancerManager:
                 for port in failed_ports:
                     self.http_balancer.remove_proxy(port)
                 
-                working_nodes = self.checker.test_nodes_with_temp_instances(
+                working_nodes = self.checker.test_exit_nodes_parallel(
                     exit_nodes, len(failed_ports)
                 )
                 
