@@ -1,6 +1,6 @@
 import logging
 import requests
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 from utils import is_valid_ipv4
 
 logger = logging.getLogger(__name__)

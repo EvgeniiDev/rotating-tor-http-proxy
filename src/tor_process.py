@@ -4,8 +4,8 @@ import os
 import time
 import threading
 import shutil
-from typing import List, Optional, Dict
-from datetime import datetime, timedelta
+from typing import List
+from datetime import datetime
 import signal
 import requests
 
@@ -106,3 +106,22 @@ class TorInstance:
             'last_check': self.last_check,
             'failed_checks': self.failed_checks
         }
+
+    def reconfigure(self, new_exit_nodes: List[str]) -> bool:
+        """
+        Reconfigures the Tor instance with new exit nodes using SIGHUP signal.
+        """
+        try:
+            self.exit_nodes = new_exit_nodes
+            
+            with open(self.config_file, 'w') as f:
+                config_content = self.config_builder.build_config(self.port, new_exit_nodes)
+                f.write(config_content)
+            
+            if self.process and self.process.poll() is None:
+                self.process.send_signal(signal.SIGHUP)
+                return True
+            return False
+            
+        except Exception as e:
+            return False

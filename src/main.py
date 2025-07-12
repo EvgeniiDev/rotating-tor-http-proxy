@@ -20,14 +20,10 @@ def main():
     
     tor_count = int(os.environ.get('TOR_PROCESSES', '20'))
     proxy_port = int(os.environ.get('PROXY_PORT', '8080'))
-    log_level = os.environ.get('LOG_LEVEL', 'INFO')
-    
-    # Настраиваем уровень логирования
-    logging.getLogger().setLevel(getattr(logging, log_level.upper()))
     
     # Создаём компоненты новой архитектуры
     config_builder = TorConfigBuilder()
-    checker = ExitNodeChecker(test_requests_count=3, required_success_count=2, timeout=10)
+    checker = ExitNodeChecker(test_requests_count=3, required_success_count=2, timeout=10, config_builder=config_builder)
     runner = TorParallelRunner(config_builder)
     balancer = HTTPLoadBalancer(listen_port=proxy_port)
     manager = TorBalancerManager(config_builder, checker, runner, balancer)
