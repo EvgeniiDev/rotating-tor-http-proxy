@@ -46,7 +46,7 @@ class TorBalancerManager:
 
         # Create exactly as many ports as we have working nodes
         actual_count = min(count, len(working_nodes))
-        ports = [9050 + i for i in range(actual_count)]
+        ports = [10000 + i for i in range(actual_count)]
         exit_nodes_for_runner = [[node] for node in working_nodes[:actual_count]]
         
         logger.info(f"Starting {actual_count} Tor processes on ports {ports[0]}-{ports[-1]}...")
