@@ -1,4 +1,5 @@
 import threading
+import os
 from typing import List, Dict
 from tor_process import TorInstance
 import logging
@@ -79,9 +80,40 @@ class TorParallelRunner:
             for port, instance in self.instances.items():
                 if instance:
                     self.logger.info(f"Stopping Tor instance on port {port}")
-                    instance.stop()
+                    try:
+                        instance.stop()
+                    except Exception as e:
+                        self.logger.error(f"Error stopping instance on port {port}: {e}")
             self.instances.clear()
         self.logger.info("All Tor instances stopped and cleaned up")
+
+    def shutdown(self):
+        self.logger.info("Shutting down TorParallelRunner...")
+        self.stop_all()
+        self._cleanup_temp_files()
+        self.logger.info("TorParallelRunner shutdown complete")
+
+    def _cleanup_temp_files(self):
+        import glob
+        temp_files = glob.glob("/tmp/tor_*")
+        if temp_files:
+            self.logger.info(f"Cleaning up {len(temp_files)} temporary Tor files...")
+            for temp_file in temp_files:
+                try:
+                    if os.path.isfile(temp_file):
+                        os.unlink(temp_file)
+                    elif os.path.isdir(temp_file):
+                        import shutil
+                        shutil.rmtree(temp_file, ignore_errors=True)
+                except Exception as e:
+                    self.logger.warning(f"Failed to remove {temp_file}: {e}")
+            self.logger.info("Temporary Tor files cleaned up")
+
+    def __del__(self):
+        try:
+            self.shutdown()
+        except Exception:
+            pass
 
     def get_statuses(self) -> Dict[int, dict]:
         with self._lock:

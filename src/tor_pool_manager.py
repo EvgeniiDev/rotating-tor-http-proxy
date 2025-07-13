@@ -27,32 +27,29 @@ class TorBalancerManager:
             
         logger.info(f"Starting pool with {count} processes using {len(exit_nodes)} exit nodes...")
         
-        # Test more nodes than needed to have backup options
-        nodes_to_test = min(len(exit_nodes), count * 3)
-        logger.info(f"Testing {nodes_to_test} exit nodes to find {count} working nodes...")
+        logger.info(f"Testing ALL {len(exit_nodes)} exit nodes for optimal distribution...")
         
-        working_nodes = self.checker.test_exit_nodes_parallel(
-            exit_nodes[:nodes_to_test], count
-        )
+        distributed_nodes = self.checker.test_exit_nodes_parallel(exit_nodes, count)
         
         logger.info("✅ Test pool automatically cleaned up after node verification")
         
-        if not working_nodes:
+        if not distributed_nodes or not any(distributed_nodes):
             logger.error("No working exit nodes found after testing")
             return False
-            
-        if len(working_nodes) < count:
-            logger.warning(f"Found only {len(working_nodes)} working nodes, requested {count}. Will use {len(working_nodes)} processes.")
-            
-        logger.info(f"Found {len(working_nodes)} working exit nodes")
+        
+        actual_working_tors = sum(1 for nodes in distributed_nodes if nodes)
+        total_working_nodes = sum(len(nodes) for nodes in distributed_nodes)
+        
+        if actual_working_tors < count:
+            logger.warning(f"Found nodes for only {actual_working_tors}/{count} Tor processes. Total working nodes: {total_working_nodes}")
+        else:
+            logger.info(f"Successfully distributed {total_working_nodes} working nodes among {actual_working_tors} Tor processes")
 
-        # Create exactly as many ports as we have working nodes
-        actual_count = min(count, len(working_nodes))
+        actual_count = min(count, actual_working_tors)
         ports = [10000 + i for i in range(actual_count)]
-        exit_nodes_for_runner = [[node] for node in working_nodes[:actual_count]]
         
         logger.info(f"Starting {actual_count} Tor processes on ports {ports[0]}-{ports[-1]}...")
-        self.runner.start_many(ports, exit_nodes_for_runner)
+        self.runner.start_many(ports, distributed_nodes[:actual_count])
         
         with self._lock:
             for port in ports:
@@ -87,15 +84,16 @@ class TorBalancerManager:
                 for port in failed_ports:
                     self.http_balancer.remove_proxy(port)
                 
-                working_nodes = self.checker.test_exit_nodes_parallel(
+                distributed_nodes = self.checker.test_exit_nodes_parallel(
                     exit_nodes, len(failed_ports)
                 )
                 
-                if working_nodes:
-                    new_ports = [port + 1000 for port in failed_ports]
-                    exit_nodes_for_runner = [[node] for node in working_nodes]
+                working_distributed = [nodes for nodes in distributed_nodes if nodes]
+                
+                if working_distributed:
+                    new_ports = [port + 1000 for port in failed_ports[:len(working_distributed)]]
                     
-                    self.runner.start_many(new_ports, exit_nodes_for_runner)
+                    self.runner.start_many(new_ports, working_distributed)
                     
                     for port in new_ports:
                         self.http_balancer.add_proxy(port)

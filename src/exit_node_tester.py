@@ -26,7 +26,7 @@ class ExitNodeChecker:
         self.config_builder = config_builder
         self.max_workers = min(max_workers, 10)
         self.batch_runner = None
-        self.base_port = 10000
+        self.base_port = 31000
 
     def test_node(self, proxy: dict) -> bool:
         success_count = 0
@@ -51,8 +51,22 @@ class ExitNodeChecker:
         logger.info(f"Node test {'PASSED' if result else 'FAILED'}: {success_count}/{self.test_requests_count} successful requests")
         return result
 
-    def test_exit_nodes_parallel(self, exit_nodes: List[str], required_count: int) -> List[str]:            
-        logger.info(f"Testing {len(exit_nodes)} exit nodes to find {required_count} working nodes...")
+    def test_exit_nodes_parallel(self, exit_nodes: List[str], required_count: int) -> List[List[str]]:
+        """
+        Тестирует все доступные exit-ноды и распределяет их между торами.
+        
+        Args:
+            exit_nodes: Список всех доступных exit-нод для тестирования
+            required_count: Количество торов, для которых нужно найти ноды
+            
+        Returns:
+            Список списков exit-нод для каждого тора
+        """
+        target_nodes_per_tor = 6
+        total_target_nodes = required_count * target_nodes_per_tor
+        
+        logger.info(f"Testing ALL {len(exit_nodes)} exit nodes for {required_count} Tor processes")
+        logger.info(f"Target: {target_nodes_per_tor} nodes per Tor ({total_target_nodes} total)")
         
         working_nodes = []
         total_tested = 0
@@ -62,20 +76,25 @@ class ExitNodeChecker:
             self._initialize_tor_instances()
         
         try:
+            total_batches = (len(exit_nodes) + self.max_workers - 1) // self.max_workers
+            
             for i in range(0, len(exit_nodes), self.max_workers):
-                if len(working_nodes) >= required_count:
-                    break
-                    
                 batch = exit_nodes[i:i+self.max_workers]
                 batch_num = i//self.max_workers + 1
-                logger.info(f"Testing batch {batch_num}: {len(batch)} nodes")
+                logger.info(f"Testing batch {batch_num}/{total_batches}: {len(batch)} nodes")
                 
                 try:
                     batch_results = self._test_batch_with_reconfigure(batch)
                     working_nodes.extend(batch_results)
                     total_tested += len(batch)
                     success_rate = len(working_nodes) / total_tested * 100 if total_tested > 0 else 0
-                    logger.info(f"Batch {batch_num} completed: {len(batch_results)}/{len(batch)} passed, total: {len(working_nodes)}/{total_tested} ({success_rate:.1f}%)")
+                    
+                    logger.info(f"Batch {batch_num} completed: {len(batch_results)}/{len(batch)} passed")
+                    logger.info(f"Progress: {len(working_nodes)}/{total_tested} total working nodes ({success_rate:.1f}%)")
+                    
+                    if len(working_nodes) >= total_target_nodes:
+                        logger.info(f"✅ Target reached: {len(working_nodes)}/{total_target_nodes} nodes found")
+                    
                 except Exception as e:
                     logger.error(f"Error in batch {batch_num}: {e}")
                     total_tested += len(batch)
@@ -83,20 +102,25 @@ class ExitNodeChecker:
         finally:
             self.cleanup()
         
-        success_rate = len(working_nodes) / total_tested * 100 if total_tested > 0 else 0
-        if len(working_nodes) < required_count:
-            logger.warning(f"Found only {len(working_nodes)}/{total_tested} working nodes ({success_rate:.1f}%), required {required_count}")
-        else:
-            logger.info(f"Successfully found {len(working_nodes)}/{total_tested} working exit nodes ({success_rate:.1f}%)")
-        
-        return working_nodes[:required_count]
+        return self._distribute_nodes_among_tors(working_nodes, required_count, target_nodes_per_tor)
 
     def cleanup(self):
         if self.batch_runner:
             logger.info("Cleaning up ExitNodeChecker test pool...")
-            self.batch_runner.stop_all()
-            self.batch_runner = None
-            logger.info("ExitNodeChecker test pool cleaned up successfully")
+            try:
+                self.batch_runner.shutdown()
+                logger.info("All Tor test instances stopped")
+            except Exception as e:
+                logger.error(f"Error stopping Tor instances: {e}")
+            finally:
+                self.batch_runner = None
+                logger.info("ExitNodeChecker test pool cleaned up successfully")
+
+    def __del__(self):
+        try:
+            self.cleanup()
+        except Exception:
+            pass
 
     def _initialize_tor_instances(self):
         ports = [self.base_port + i for i in range(self.max_workers)]
@@ -170,3 +194,57 @@ class ExitNodeChecker:
     
         proxy = instance.get_proxies()
         return self.test_node(proxy)
+
+    def _distribute_nodes_among_tors(self, working_nodes: List[str], tor_count: int, target_per_tor: int) -> List[List[str]]:
+        """
+        Равномерно распределяет найденные exit-ноды между торами.
+        
+        Args:
+            working_nodes: Список всех найденных рабочих exit-нод
+            tor_count: Количество торов
+            target_per_tor: Целевое количество нод на тор
+            
+        Returns:
+            Список списков exit-нод для каждого тора
+        """
+        if not working_nodes:
+            logger.warning("No working nodes found for distribution")
+            return [[] for _ in range(tor_count)]
+        
+        total_found = len(working_nodes)
+        total_target = tor_count * target_per_tor
+        
+        logger.info(f"📊 Distributing {total_found} working nodes among {tor_count} Tor processes")
+        
+        if total_found >= total_target:
+            logger.info(f"✅ Sufficient nodes found: {total_found}/{total_target}")
+            nodes_per_tor = target_per_tor
+        else:
+            nodes_per_tor = total_found // tor_count
+            extra_nodes = total_found % tor_count
+            logger.warning(f"⚠️ Insufficient nodes: {total_found}/{total_target}")
+            logger.info(f"📋 Distribution plan: {nodes_per_tor} nodes per Tor + {extra_nodes} extra")
+        
+        distributed_nodes = []
+        node_index = 0
+        
+        for tor_index in range(tor_count):
+            tor_nodes = []
+            
+            if total_found >= total_target:
+                nodes_for_this_tor = nodes_per_tor
+            else:
+                nodes_for_this_tor = nodes_per_tor + (1 if tor_index < extra_nodes else 0)
+            
+            for _ in range(nodes_for_this_tor):
+                if node_index < len(working_nodes):
+                    tor_nodes.append(working_nodes[node_index])
+                    node_index += 1
+            
+            distributed_nodes.append(tor_nodes)
+            logger.info(f"🔹 Tor {tor_index + 1}: {len(tor_nodes)} exit nodes assigned")
+        
+        used_nodes = sum(len(nodes) for nodes in distributed_nodes)
+        logger.info(f"📈 Distribution complete: {used_nodes}/{total_found} nodes assigned")
+        
+        return distributed_nodes
