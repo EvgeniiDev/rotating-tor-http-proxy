@@ -16,12 +16,12 @@ logging.basicConfig(
 )
 
 def main():
-    tor_count = int(os.environ.get('TOR_PROCESSES', '20'))
+    tor_count = int(os.environ.get('TOR_PROCESSES', '50'))
     proxy_port = int(os.environ.get('PROXY_PORT', '8080'))
     
     config_builder = TorConfigBuilder()
-    checker = ExitNodeChecker(test_requests_count=6, required_success_count=3, timeout=30, config_builder=config_builder, max_workers=tor_count)
-    runner = TorParallelRunner(config_builder, max_concurrent=20)
+    checker = ExitNodeChecker(test_requests_count=6, required_success_count=3, timeout=30, config_builder=config_builder, max_workers=min(20, tor_count))
+    runner = TorParallelRunner(config_builder)
     balancer = HTTPLoadBalancer(listen_port=proxy_port)
     manager = TorBalancerManager(config_builder, checker, runner, balancer)
     

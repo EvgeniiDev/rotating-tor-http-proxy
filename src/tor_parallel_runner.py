@@ -2,6 +2,7 @@ import threading
 from typing import List, Dict
 from tor_process import TorInstance
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class TorParallelRunner:
     """
@@ -12,28 +13,48 @@ class TorParallelRunner:
     - Управляет жизненным циклом каждого процесса (старт/стоп/рестарт)
     - Предоставляет thread-safe доступ к статусам всех процессов
     """
-    def __init__(self, config_builder, max_concurrent: int = 20):
+    def __init__(self, config_builder, max_workers: int = 10):
         self.config_builder = config_builder
-        self.max_concurrent = max_concurrent
+        self.max_workers = max_workers
         self.instances: Dict[int, TorInstance] = {}
         self._lock = threading.RLock()
         self.logger = logging.getLogger(__name__)
 
     def start_many(self, ports: List[int], exit_nodes_list: List[List[str]]):
-        threads = []
-        results = [None] * len(ports)
-        def thread_func(idx, port, exit_nodes):
-            result = self._start_instance(port, exit_nodes)
-            results[idx] = result
-        for i, (port, exit_nodes) in enumerate(zip(ports, exit_nodes_list)):
-            t = threading.Thread(target=thread_func, args=(i, port, exit_nodes))
-            t.start()
-            threads.append(t)
-        for t in threads:
-            t.join()
+        max_workers = min(self.max_workers, len(ports))
+        self.logger.info(f"Starting {len(ports)} Tor processes with max {max_workers} concurrent workers")
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Отправляем все задачи в пул
+            future_to_port = {}
+            for port, exit_nodes in zip(ports, exit_nodes_list):
+                future = executor.submit(self._start_instance, port, exit_nodes)
+                future_to_port[future] = port
+            
+            completed_count = 0
+            successful_count = 0
+            
+            # Обрабатываем завершенные задачи по мере их готовности
+            for future in as_completed(future_to_port):
+                port = future_to_port[future]
+                completed_count += 1
+                
+                try:
+                    result = future.result()
+                    if result:
+                        successful_count += 1
+                        self.logger.info(f"✅ Process {completed_count}/{len(ports)}: Tor on port {port} started successfully")
+                    else:
+                        self.logger.warning(f"❌ Process {completed_count}/{len(ports)}: Tor on port {port} failed to start")
+                except Exception as e:
+                    self.logger.error(f"❌ Process {completed_count}/{len(ports)}: Tor on port {port} failed with exception: {e}")
+        
         # Оставляем только успешно стартовавшие инстансы
         with self._lock:
             self.instances = {port: inst for port, inst in self.instances.items() if inst is not None and inst.is_running}
+            
+        total_started = len(self.instances)
+        self.logger.info(f"All processes completed: {total_started}/{len(ports)} total processes started successfully")
 
     def _start_instance(self, port: int, exit_nodes: List[str]):
         instance = TorInstance(port, exit_nodes, self.config_builder)
