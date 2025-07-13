@@ -8,6 +8,7 @@ from typing import List
 from datetime import datetime
 import signal
 import requests
+import logging
 
 class TorInstance:
     """
@@ -32,6 +33,7 @@ class TorInstance:
         self.current_exit_ip = None
         self._health_thread = None
         self._stop_health = False
+        self.logger = logging.getLogger(__name__)
 
     def create_config(self):
         temp_fd, self.config_file = tempfile.mkstemp(suffix='.torrc', prefix=f'tor_{self.port}_')
@@ -45,17 +47,34 @@ class TorInstance:
 
     def start(self):
         cmd = ['tor', '-f', self.config_file]
+        
         try:
             if hasattr(os, 'setsid'):
-                self.process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=os.setsid)
+                self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid, text=True)
             else:
-                self.process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            
             self.is_running = True
+            self.logger.info(f"Tor process started on port {self.port}, PID: {self.process.pid}")
+            
+            time.sleep(2)
+            
+            poll_result = self.process.poll()
+            if poll_result is not None:
+                stdout, stderr = self.process.communicate(timeout=5)
+                self.logger.error(f"Tor process on port {self.port} exited with code {poll_result}")
+                self.logger.error(f"STDOUT: {stdout}")
+                self.logger.error(f"STDERR: {stderr}")
+                self.is_running = False
+                return False
+            
             self._stop_health = False
             self._health_thread = threading.Thread(target=self._health_monitor, daemon=True)
             self._health_thread.start()
             return True
-        except Exception:
+            
+        except Exception as e:
+            self.logger.error(f"Failed to start Tor process on port {self.port}: {e}", exc_info=True)
             return False
 
     def stop(self):
@@ -72,12 +91,10 @@ class TorInstance:
         self.process = None
         self.is_running = False
         
-        # Cleanup temporary config file
         if self.config_file and os.path.exists(self.config_file):
             os.unlink(self.config_file)
             self.config_file = None
             
-        # Cleanup data directory to avoid disk buildup
         data_dir = os.path.expanduser(f'~/tor-http-proxy/data/data_{self.port}')
         if os.path.exists(data_dir):
             shutil.rmtree(data_dir, ignore_errors=True)
@@ -88,15 +105,26 @@ class TorInstance:
             time.sleep(5)
 
     def check_health(self) -> bool:
+        if not self.process:
+            self.logger.debug(f"Port {self.port}: No process to check")
+            return False
+            
+        poll_result = self.process.poll()
+        if poll_result is not None:
+            self.logger.warning(f"Port {self.port}: Process died with exit code {poll_result}")
+            self.is_running = False
+            return False
+        
         url = 'https://api.ipify.org?format=json'
         try:
-            response = requests.get(url, proxies=self.get_proxies(), timeout=10)
+            response = requests.get(url, proxies=self.get_proxies(), timeout=60)
             if response.status_code == 200:
                 self.current_exit_ip = response.json().get('ip')
                 self.failed_checks = 0
                 self.last_check = datetime.now()
                 return True
-        except Exception:
+        except Exception as e:
+            self.logger.debug(f"Port {self.port}: Health check failed: {e}")
             pass
         self.failed_checks += 1
         return False
@@ -118,19 +146,30 @@ class TorInstance:
         Reconfigures the Tor instance with new exit nodes using SIGHUP signal.
         """
         try:
+            self.logger.info(f"Reconfiguring port {self.port} with nodes: {new_exit_nodes}")
+            
+            if not self.process:
+                self.logger.error(f"Port {self.port}: No process found")
+                return False
+                
+            poll_result = self.process.poll()
+            if poll_result is not None:
+                self.logger.error(f"Port {self.port}: Process is not running (poll={poll_result})")
+                return False
+                
+            self.logger.info(f"Port {self.port}: Process is running, updating config")
+            
             self.exit_nodes = new_exit_nodes
             
             with open(self.config_file, 'w') as f:
                 config_content = self.config_builder.build_config(self.port, new_exit_nodes)
                 f.write(config_content)
             
-            if self.process and self.process.poll() is None:
-                self.process.send_signal(signal.SIGHUP)
-                return True
-            return False
+            self.logger.info(f"Port {self.port}: Config written, sending SIGHUP")
+            self.process.send_signal(signal.SIGHUP)
+            self.logger.info(f"Port {self.port}: SIGHUP sent successfully")
+            return True
             
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Reconfiguration failed for port {self.port}: {e}")
+            self.logger.error(f"Reconfiguration failed for port {self.port}: {e}", exc_info=True)
             return False
