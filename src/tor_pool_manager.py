@@ -35,9 +35,7 @@ class TorBalancerManager:
             exit_nodes[:nodes_to_test], count
         )
         
-        # Cleanup test pool after checking nodes
-        self.checker.cleanup()
-        logger.info("✅ Test pool cleaned up after node verification")
+        logger.info("✅ Test pool automatically cleaned up after node verification")
         
         if not working_nodes:
             logger.error("No working exit nodes found after testing")

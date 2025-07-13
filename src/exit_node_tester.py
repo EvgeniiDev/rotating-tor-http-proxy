@@ -24,9 +24,9 @@ class ExitNodeChecker:
         self.required_success_count = required_success_count
         self.timeout = timeout
         self.config_builder = config_builder
-        self.max_workers = max_workers
+        self.max_workers = min(max_workers, 10)
         self.batch_runner = None
-        self.base_port = 30000
+        self.base_port = 10000
 
     def test_node(self, proxy: dict) -> bool:
         success_count = 0
@@ -61,24 +61,27 @@ class ExitNodeChecker:
             self.batch_runner = TorParallelRunner(self.config_builder, max_workers=self.max_workers)
             self._initialize_tor_instances()
         
-        for i in range(0, len(exit_nodes), self.max_workers):
-            if len(working_nodes) >= required_count:
-                break
+        try:
+            for i in range(0, len(exit_nodes), self.max_workers):
+                if len(working_nodes) >= required_count:
+                    break
+                    
+                batch = exit_nodes[i:i+self.max_workers]
+                batch_num = i//self.max_workers + 1
+                logger.info(f"Testing batch {batch_num}: {len(batch)} nodes")
                 
-            batch = exit_nodes[i:i+self.max_workers]
-            batch_num = i//self.max_workers + 1
-            logger.info(f"Testing batch {batch_num}: {len(batch)} nodes")
-            
-            try:
-                batch_results = self._test_batch_with_reconfigure(batch)
-                working_nodes.extend(batch_results)
-                total_tested += len(batch)
-                success_rate = len(working_nodes) / total_tested * 100 if total_tested > 0 else 0
-                logger.info(f"Batch {batch_num} completed: {len(batch_results)}/{len(batch)} passed, total: {len(working_nodes)}/{total_tested} ({success_rate:.1f}%)")
-            except Exception as e:
-                logger.error(f"Error in batch {batch_num}: {e}")
-                total_tested += len(batch)
-                continue
+                try:
+                    batch_results = self._test_batch_with_reconfigure(batch)
+                    working_nodes.extend(batch_results)
+                    total_tested += len(batch)
+                    success_rate = len(working_nodes) / total_tested * 100 if total_tested > 0 else 0
+                    logger.info(f"Batch {batch_num} completed: {len(batch_results)}/{len(batch)} passed, total: {len(working_nodes)}/{total_tested} ({success_rate:.1f}%)")
+                except Exception as e:
+                    logger.error(f"Error in batch {batch_num}: {e}")
+                    total_tested += len(batch)
+                    continue
+        finally:
+            self.cleanup()
         
         success_rate = len(working_nodes) / total_tested * 100 if total_tested > 0 else 0
         if len(working_nodes) < required_count:
@@ -90,8 +93,10 @@ class ExitNodeChecker:
 
     def cleanup(self):
         if self.batch_runner:
+            logger.info("Cleaning up ExitNodeChecker test pool...")
             self.batch_runner.stop_all()
             self.batch_runner = None
+            logger.info("ExitNodeChecker test pool cleaned up successfully")
 
     def _initialize_tor_instances(self):
         ports = [self.base_port + i for i in range(self.max_workers)]

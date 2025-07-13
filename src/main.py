@@ -20,7 +20,8 @@ def main():
     proxy_port = int(os.environ.get('PROXY_PORT', '8080'))
     
     config_builder = TorConfigBuilder()
-    checker = ExitNodeChecker(test_requests_count=6, required_success_count=3, timeout=30, config_builder=config_builder, max_workers=min(20, tor_count))
+    max_test_workers = min(10, tor_count)
+    checker = ExitNodeChecker(test_requests_count=6, required_success_count=3, timeout=30, config_builder=config_builder, max_workers=max_test_workers)
     runner = TorParallelRunner(config_builder)
     balancer = HTTPLoadBalancer(listen_port=proxy_port)
     manager = TorBalancerManager(config_builder, checker, runner, balancer)
@@ -61,8 +62,15 @@ def main():
     except Exception as e:
         print(f"❌ Error: {e}")
     finally:
-        checker.cleanup()
-        manager.stop()
+        print("🧹 Cleaning up resources...")
+        try:
+            checker.cleanup()
+        except Exception as e:
+            print(f"Warning: Error during checker cleanup: {e}")
+        try:
+            manager.stop()
+        except Exception as e:
+            print(f"Warning: Error during manager stop: {e}")
         print("✅ Pool stopped")
 
 if __name__ == "__main__":

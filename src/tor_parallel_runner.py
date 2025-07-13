@@ -15,7 +15,7 @@ class TorParallelRunner:
     """
     def __init__(self, config_builder, max_workers: int = 10):
         self.config_builder = config_builder
-        self.max_workers = max_workers
+        self.max_workers = min(max_workers, 10)
         self.instances: Dict[int, TorInstance] = {}
         self._lock = threading.RLock()
         self.logger = logging.getLogger(__name__)
@@ -74,10 +74,14 @@ class TorParallelRunner:
         return started and healthy
 
     def stop_all(self):
+        self.logger.info(f"Stopping {len(self.instances)} Tor instances...")
         with self._lock:
-            for instance in self.instances.values():
-                instance.stop()
+            for port, instance in self.instances.items():
+                if instance:
+                    self.logger.info(f"Stopping Tor instance on port {port}")
+                    instance.stop()
             self.instances.clear()
+        self.logger.info("All Tor instances stopped and cleaned up")
 
     def get_statuses(self) -> Dict[int, dict]:
         with self._lock:
