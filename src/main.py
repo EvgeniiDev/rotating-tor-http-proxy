@@ -54,7 +54,6 @@ def cleanup_tor_processes():
     except Exception as e:
         print(f"⚠️ Error cleaning temp files: {e}")
     
-    time.sleep(2)
     print("✅ Cleanup completed")
 
 def main():
@@ -66,8 +65,8 @@ def main():
     proxy_port = int(os.environ.get('PROXY_PORT', '8080'))
     
     config_builder = TorConfigBuilder()
-    checker = ExitNodeChecker(test_requests_count=6, required_success_count=3, timeout=30, config_builder=config_builder)
-    runner = TorParallelRunner(config_builder)
+    checker = ExitNodeChecker(test_requests_count=6, required_success_count=3, timeout=30, config_builder=config_builder, max_workers=tor_count)
+    runner = TorParallelRunner(config_builder, max_concurrent=20)
     balancer = HTTPLoadBalancer(listen_port=proxy_port)
     manager = TorBalancerManager(config_builder, checker, runner, balancer)
     

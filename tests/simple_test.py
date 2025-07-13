@@ -4,6 +4,9 @@
 """
 import logging
 import time
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 from config_manager import TorConfigBuilder
 from tor_process import TorInstance
 from http_load_balancer import HTTPLoadBalancer

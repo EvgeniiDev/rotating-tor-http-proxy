@@ -111,7 +111,7 @@ class ExitNodeChecker:
             logger.info(f"Available instances: {list(self.batch_runner.instances.keys())}")
             
             for i, exit_node in enumerate(exit_nodes):
-                if i >= self.max_workers:
+                if i >= len(self.batch_runner.instances):
                     break
                     
                 port = self.base_port + i

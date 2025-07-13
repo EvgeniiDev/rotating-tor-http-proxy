@@ -26,8 +26,6 @@ class TorParallelRunner:
             result = self._start_instance(port, exit_nodes)
             results[idx] = result
         for i, (port, exit_nodes) in enumerate(zip(ports, exit_nodes_list)):
-            if i >= self.max_concurrent:
-                break
             t = threading.Thread(target=thread_func, args=(i, port, exit_nodes))
             t.start()
             threads.append(t)
