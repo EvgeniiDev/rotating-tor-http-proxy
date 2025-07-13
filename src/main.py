@@ -2,8 +2,6 @@
 import os
 import logging
 import time
-import subprocess
-import signal
 
 from http_load_balancer import HTTPLoadBalancer
 from tor_pool_manager import TorBalancerManager
@@ -17,50 +15,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-def cleanup_tor_processes():
-    """Очищает все существующие процессы Tor перед стартом"""
-    print("🧹 Cleaning up existing Tor processes...")
-    
-    try:
-        result = subprocess.run(['pkill', '-f', 'tor'], capture_output=True, text=True)
-        if result.returncode == 0:
-            print("✅ Killed existing Tor processes")
-        else:
-            print("ℹ️ No existing Tor processes found")
-    except Exception as e:
-        print(f"⚠️ Error killing Tor processes: {e}")
-    
-    try:
-        result = subprocess.run(['pkill', '-f', 'python.*tor'], capture_output=True, text=True)
-        if result.returncode == 0:
-            print("✅ Killed existing Python Tor processes")
-    except Exception as e:
-        print(f"⚠️ Error killing Python Tor processes: {e}")
-    
-    try:
-        import glob
-        config_files = glob.glob('/tmp/torrc_*')
-        data_dirs = glob.glob('/tmp/tor_data_*')
-        
-        for file in config_files + data_dirs:
-            try:
-                if os.path.isfile(file):
-                    os.remove(file)
-                elif os.path.isdir(file):
-                    subprocess.run(['rm', '-rf', file], check=True)
-                print(f"✅ Removed {file}")
-            except Exception as e:
-                print(f"⚠️ Failed to remove {file}: {e}")
-    except Exception as e:
-        print(f"⚠️ Error cleaning temp files: {e}")
-    
-    print("✅ Cleanup completed")
-
 def main():
-    cleanup_tor_processes()
-    
-    print("Starting Tor HTTP Proxy with new architecture...")
-    
     tor_count = int(os.environ.get('TOR_PROCESSES', '20'))
     proxy_port = int(os.environ.get('PROXY_PORT', '8080'))
     
