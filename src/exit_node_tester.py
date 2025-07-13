@@ -55,6 +55,7 @@ class ExitNodeChecker:
         logger.info(f"Testing {len(exit_nodes)} exit nodes to find {required_count} working nodes...")
         
         working_nodes = []
+        total_tested = 0
         
         if self.batch_runner is None:
             self.batch_runner = TorParallelRunner(self.config_builder, max_workers=self.max_workers)
@@ -71,15 +72,19 @@ class ExitNodeChecker:
             try:
                 batch_results = self._test_batch_with_reconfigure(batch)
                 working_nodes.extend(batch_results)
-                logger.info(f"Batch {batch_num} completed: {len(batch_results)} working nodes found, total: {len(working_nodes)}")
+                total_tested += len(batch)
+                success_rate = len(working_nodes) / total_tested * 100 if total_tested > 0 else 0
+                logger.info(f"Batch {batch_num} completed: {len(batch_results)}/{len(batch)} passed, total: {len(working_nodes)}/{total_tested} ({success_rate:.1f}%)")
             except Exception as e:
                 logger.error(f"Error in batch {batch_num}: {e}")
+                total_tested += len(batch)
                 continue
         
+        success_rate = len(working_nodes) / total_tested * 100 if total_tested > 0 else 0
         if len(working_nodes) < required_count:
-            logger.warning(f"Found only {len(working_nodes)} working nodes, required {required_count}")
+            logger.warning(f"Found only {len(working_nodes)}/{total_tested} working nodes ({success_rate:.1f}%), required {required_count}")
         else:
-            logger.info(f"Successfully found {len(working_nodes)} working exit nodes")
+            logger.info(f"Successfully found {len(working_nodes)}/{total_tested} working exit nodes ({success_rate:.1f}%)")
         
         return working_nodes[:required_count]
 
@@ -94,8 +99,6 @@ class ExitNodeChecker:
         logger.info(f"Initializing {len(ports)} Tor instances on ports: {ports}")
         self.batch_runner.start_many(ports, exit_nodes_list)
         
-        time.sleep(5)
-        
         logger.info(f"Started instances: {list(self.batch_runner.instances.keys())}")
         for port, instance in self.batch_runner.instances.items():
             status = instance.get_status()
@@ -105,7 +108,6 @@ class ExitNodeChecker:
         logger.info(f"Testing batch with {len(exit_nodes)} exit nodes using parallel reconfiguration")
         logger.info(f"Available instances: {list(self.batch_runner.instances.keys())}")
         
-        # Prepare tasks for parallel execution
         test_tasks = []
         for i, exit_node in enumerate(exit_nodes):
             if i >= len(self.batch_runner.instances):
@@ -124,19 +126,16 @@ class ExitNodeChecker:
         
         logger.info(f"Starting parallel testing of {len(test_tasks)} exit nodes")
         
-        # Execute tests in parallel
         working_nodes = []
         max_workers = min(len(test_tasks), self.max_workers)
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_node = {}
             
-            # Submit all test tasks
             for exit_node, port, instance in test_tasks:
                 future = executor.submit(self._test_single_node, exit_node, port, instance)
                 future_to_node[future] = exit_node
             
-            # Process results as they complete
             completed_count = 0
             for future in as_completed(future_to_node):
                 exit_node = future_to_node[future]
@@ -152,41 +151,17 @@ class ExitNodeChecker:
                 except Exception as e:
                     logger.error(f"❌ Test {completed_count}/{len(test_tasks)}: Node {exit_node} ERROR: {e}")
         
-        logger.info(f"Parallel batch testing completed, found {len(working_nodes)} working nodes")
+        logger.info(f"Parallel batch testing completed: {len(working_nodes)}/{len(test_tasks)} nodes passed testing")
         return working_nodes
     
     def _test_single_node(self, exit_node: str, port: int, instance) -> bool:
-        """Test a single exit node - designed to run in parallel"""
-        try:
-            logger.info(f"Testing node {exit_node} on port {port}")
-            
-            # Step 1: Reconfigure instance for this exit node
-            if not instance.reconfigure([exit_node]):
-                logger.warning(f"Failed to reconfigure instance for node {exit_node}")
-                return False
-            
-            logger.info(f"Successfully reconfigured instance for node {exit_node}")
-            
-            # Step 2: Health check
-            if not instance.check_health():
-                logger.warning(f"Health check failed for node {exit_node}")
-                return False
-            
-            logger.info(f"Health check passed for node {exit_node}")
-            
-            # Step 3: Get proxy configuration
-            proxy = instance.get_proxies()
-            logger.info(f"Testing proxy {proxy} for node {exit_node}")
-            
-            # Step 4: Test the proxy
-            if self.test_node(proxy):
-                logger.info(f"✓ Node {exit_node} passed all tests")
-                return True
-            else:
-                logger.warning(f"✗ Node {exit_node} failed proxy test")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Exception while testing node {exit_node}: {e}", exc_info=True)
+        if not instance.reconfigure([exit_node]):
+            logger.warning(f"Failed to reconfigure instance for node {exit_node}")
             return False
-
+        
+        if not instance.check_health():
+            logger.warning(f"Health check failed for node {exit_node}")
+            return False
+    
+        proxy = instance.get_proxies()
+        return self.test_node(proxy)
