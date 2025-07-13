@@ -19,6 +19,7 @@ help:
 	@echo "  test-contract   - Run API contract validation tests"
 	@echo "  test-parallel   - Run parallel exit node tests"
 	@echo "  test-basic      - Run basic integration tests"
+	@echo "  test-basic-proxy - Run basic integration with proxy tests"
 	@echo "  test-full       - Run full integration tests"
 	@echo "  test-simple     - Run simple tests"
 	@echo "  test-debug      - Run debug tests"
@@ -64,7 +65,17 @@ test-parallel:
 .PHONY: test-basic
 test-basic:
 	@echo "Running basic integration tests..."
-	$(TIMEOUT) env $(PYTHONPATH) $(PYTHON) -m pytest test_basic_integration.py -v
+	$(TIMEOUT) env $(PYTHONPATH) $(PYTHON) -m pytest test_basic_integration.py::TestBasicIntegration::test_application_starts_and_shows_expected_output -v
+
+.PHONY: test-basic-proxy
+test-basic-proxy:
+	@echo "Running basic integration tests with proxy validation..."
+	timeout 120s env $(PYTHONPATH) $(PYTHON) -m pytest test_basic_integration.py -v
+
+.PHONY: test-basic-standalone
+test-basic-standalone:
+	@echo "Running comprehensive standalone integration test..."
+	timeout 120s env $(PYTHONPATH) $(PYTHON) test_basic_integration.py --standalone
 
 .PHONY: test-full
 test-full:
