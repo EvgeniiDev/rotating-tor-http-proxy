@@ -20,28 +20,40 @@ class TorParallelRunner:
         self.instances: Dict[int, TorInstance] = {}
         self._lock = threading.RLock()
         self.logger = logging.getLogger(__name__)
+        self._shutdown_event = threading.Event()
+        self._executor = None
 
     def start_many(self, ports: List[int], exit_nodes_list: List[List[str]]):
+        if self._shutdown_event.is_set():
+            self.logger.warning("Cannot start instances - runner is shutting down")
+            return
+            
         max_workers = min(self.max_workers, len(ports))
         self.logger.info(f"Starting {len(ports)} Tor processes with max {max_workers} concurrent workers")
         
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Отправляем все задачи в пул
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="TorStarter")
+        
+        try:
             future_to_port = {}
             for port, exit_nodes in zip(ports, exit_nodes_list):
-                future = executor.submit(self._start_instance, port, exit_nodes)
+                if self._shutdown_event.is_set():
+                    break
+                future = self._executor.submit(self._start_instance, port, exit_nodes)
                 future_to_port[future] = port
             
             completed_count = 0
             successful_count = 0
             
-            # Обрабатываем завершенные задачи по мере их готовности
             for future in as_completed(future_to_port):
+                if self._shutdown_event.is_set():
+                    break
+                    
                 port = future_to_port[future]
                 completed_count += 1
                 
                 try:
-                    result = future.result()
+                    result = future.result(timeout=30)
                     if result:
                         successful_count += 1
                         self.logger.info(f"✅ Process {completed_count}/{len(ports)}: Tor on port {port} started successfully")
@@ -50,7 +62,9 @@ class TorParallelRunner:
                 except Exception as e:
                     self.logger.error(f"❌ Process {completed_count}/{len(ports)}: Tor on port {port} failed with exception: {e}")
         
-        # Оставляем только успешно стартовавшие инстансы
+        except Exception as e:
+            self.logger.error(f"Error during parallel start: {e}")
+        
         with self._lock:
             self.instances = {port: inst for port, inst in self.instances.items() if inst is not None and inst.is_running}
             
@@ -76,6 +90,8 @@ class TorParallelRunner:
 
     def stop_all(self):
         self.logger.info(f"Stopping {len(self.instances)} Tor instances...")
+        self._shutdown_event.set()
+        
         with self._lock:
             for port, instance in self.instances.items():
                 if instance:
@@ -89,6 +105,13 @@ class TorParallelRunner:
 
     def shutdown(self):
         self.logger.info("Shutting down TorParallelRunner...")
+        self._shutdown_event.set()
+        
+        if self._executor:
+            self.logger.info("Shutting down thread pool executor...")
+            self._executor.shutdown(wait=True)
+            self._executor = None
+            
         self.stop_all()
         self._cleanup_temp_files()
         self.logger.info("TorParallelRunner shutdown complete")

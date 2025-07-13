@@ -32,7 +32,7 @@ class TorInstance:
         self.last_check = None
         self.current_exit_ip = None
         self._health_thread = None
-        self._stop_health = False
+        self._stop_health = threading.Event()
         self.logger = logging.getLogger(__name__)
 
     def create_config(self):
@@ -68,9 +68,14 @@ class TorInstance:
                 self.is_running = False
                 return False
             
-            self._stop_health = False
-            self._health_thread = threading.Thread(target=self._health_monitor, daemon=True)
+            self._stop_health.clear()
+            self._health_thread = threading.Thread(target=self._health_monitor, daemon=True, name=f"HealthMonitor-{self.port}")
             self._health_thread.start()
+            
+            # Регистрируем поток
+            from utils import register_thread
+            register_thread(self._health_thread, "health_monitor")
+            
             return True
             
         except Exception as e:
@@ -78,18 +83,33 @@ class TorInstance:
             return False
 
     def stop(self):
-        self._stop_health = True
-        if self._health_thread:
-            self._health_thread.join(timeout=2)
+        self.logger.info(f"Stopping Tor instance on port {self.port}")
+        self._stop_health.set()
+        
+        if self._health_thread and self._health_thread.is_alive():
+            self.logger.debug(f"Waiting for health monitor thread to stop for port {self.port}")
+            self._health_thread.join(timeout=5)
+            if self._health_thread.is_alive():
+                self.logger.warning(f"Health monitor thread for port {self.port} did not stop gracefully")
+            else:
+                # Удаляем из реестра
+                from utils import unregister_thread
+                unregister_thread(self._health_thread)
+        
         if self.process and self.process.poll() is None:
-            self.process.terminate()
             try:
+                self.process.terminate()
                 self.process.wait(timeout=10)
+                self.logger.info(f"Tor process on port {self.port} terminated gracefully")
             except subprocess.TimeoutExpired:
+                self.logger.warning(f"Tor process on port {self.port} did not terminate, killing...")
                 self.process.kill()
                 self.process.wait()
+                self.logger.info(f"Tor process on port {self.port} killed")
+        
         self.process = None
         self.is_running = False
+        self._health_thread = None
         
         if self.config_file and os.path.exists(self.config_file):
             os.unlink(self.config_file)
@@ -100,9 +120,16 @@ class TorInstance:
             shutil.rmtree(data_dir, ignore_errors=True)
 
     def _health_monitor(self):
-        while not self._stop_health:
-            self.check_health()
-            time.sleep(5)
+        self.logger.debug(f"Starting health monitor for port {self.port}")
+        while not self._stop_health.is_set():
+            try:
+                self.check_health()
+            except Exception as e:
+                self.logger.error(f"Health monitor error for port {self.port}: {e}")
+            
+            if self._stop_health.wait(timeout=5):
+                break
+        self.logger.debug(f"Health monitor stopped for port {self.port}")
 
     def check_health(self) -> bool:
         if not self.process:
@@ -173,3 +200,9 @@ class TorInstance:
         except Exception as e:
             self.logger.error(f"Reconfiguration failed for port {self.port}: {e}", exc_info=True)
             return False
+
+    def __del__(self):
+        try:
+            self.stop()
+        except Exception:
+            pass
