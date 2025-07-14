@@ -20,7 +20,7 @@ class PolipoConfigBuilder:
             "censoredHeaders=from,accept-language,x-pad,link",
             "censorReferer=maybe"
         ]
-        return '\n'.join(config_lines)
+        return '\n'.join(config_lines) + '\n'
 
     def write_config_file(self, http_port: int, socks_port: int) -> str:
         config_content = self.build_config(http_port, socks_port)

@@ -42,7 +42,7 @@ class HAProxyConfigBuilder:
             config_lines.append(
                 f"    server tor_{i+1} 127.0.0.1:{http_port} check")
 
-        return '\n'.join(config_lines)
+        return '\n'.join(config_lines) + '\n'
 
     def write_config_file(self, proxy_servers: List[Dict[str, int]], listen_port: int = 8080, stats_port: int = 8404) -> str:
         config_content = self.build_config(proxy_servers, listen_port, stats_port)

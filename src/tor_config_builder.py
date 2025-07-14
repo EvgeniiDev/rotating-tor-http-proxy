@@ -29,7 +29,7 @@ class TorConfigBuilder:
             "EnforceDistinctSubnets 0",
         ]
 
-        return '\n'.join(config_lines)
+        return '\n'.join(config_lines) + '\n'
 
     def write_config_file(self, socks_port: int, exit_nodes: List[str]) -> str:
         config_content = self.build_config(socks_port, exit_nodes)
