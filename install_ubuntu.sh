@@ -5,7 +5,7 @@ set -e
 PROJECT_DIR="$HOME/tor-http-proxy"
 SERVICE_NAME="tor-http-proxy"
 USER="$USER"
-TOR_PROCESSES=200
+TOR_PROCESSES=850
 
 if [[ $EUID -ne 0 ]]; then
    echo "This script must be run as root (use sudo)" 
@@ -45,10 +45,10 @@ Environment=PYTHONPATH=$PROJECT_DIR
 Environment=TOR_PROCESSES=$TOR_PROCESSES
 ExecStart=$PROJECT_DIR/venv/bin/python $PROJECT_DIR/main.py
 MemoryAccounting=yes
-MemoryHigh=4.3G
-MemoryMax=4.5G
+MemoryHigh=23.5G
+MemoryMax=24G
 CPUAccounting=yes
-CPUQuota=200%
+CPUQuota=400%
 
 [Install]
 WantedBy=multi-user.target
