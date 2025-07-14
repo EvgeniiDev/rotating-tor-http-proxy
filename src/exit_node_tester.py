@@ -55,16 +55,6 @@ class ExitNodeChecker:
         return result
 
     def test_exit_nodes_parallel(self, exit_nodes: List[str], required_count: int) -> List[List[str]]:
-        """
-        Тестирует все доступные exit-ноды и распределяет их между торами.
-        
-        Args:
-            exit_nodes: Список всех доступных exit-нод для тестирования
-            required_count: Количество торов, для которых нужно найти ноды
-            
-        Returns:
-            Список списков exit-нод для каждого тора
-        """
         target_nodes_per_tor = 6
         total_target_nodes = required_count * target_nodes_per_tor
         
@@ -221,17 +211,6 @@ class ExitNodeChecker:
         return self.test_node(proxy)
 
     def _distribute_nodes_among_tors(self, working_nodes: List[str], tor_count: int, target_per_tor: int) -> List[List[str]]:
-        """
-        Равномерно распределяет найденные exit-ноды между торами.
-        
-        Args:
-            working_nodes: Список всех найденных рабочих exit-нод
-            tor_count: Количество торов
-            target_per_tor: Целевое количество нод на тор
-            
-        Returns:
-            Список списков exit-нод для каждого тора
-        """
         if not working_nodes:
             logger.warning("No working nodes found for distribution")
             return [[] for _ in range(tor_count)]
@@ -275,18 +254,6 @@ class ExitNodeChecker:
         return distributed_nodes
 
     def scan_all_exit_nodes(self, test_requests_count: int = 6, required_success_count: int = 3) -> dict:
-        """
-        Сканирует все доступные exit-ноды Tor и разделяет их на два списка:
-        - passed_nodes: ноды, которые прошли проверку (3+ успешных запроса из 6)
-        - failed_nodes: ноды, которые не прошли проверку
-        
-        Args:
-            test_requests_count: Количество тестовых запросов к каждой ноде
-            required_success_count: Минимальное количество успешных запросов для прохождения теста
-            
-        Returns:
-            dict: {"passed_nodes": List[str], "failed_nodes": List[str], "stats": dict}
-        """
         from tor_relay_manager import TorRelayManager
         
         self.test_requests_count = test_requests_count

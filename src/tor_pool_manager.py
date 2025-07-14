@@ -26,9 +26,6 @@ class TorBalancerManager:
             return False
             
         logger.info(f"Starting pool with {count} processes using {len(exit_nodes)} exit nodes...")
-        
-        logger.info(f"Testing ALL {len(exit_nodes)} exit nodes for optimal distribution...")
-        
         distributed_nodes = self.checker.test_exit_nodes_parallel(exit_nodes, count)
         
         logger.info("✅ Test pool automatically cleaned up after node verification")
