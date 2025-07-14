@@ -8,7 +8,7 @@ class HAProxyConfigBuilder:
         os.makedirs(self.config_dir, exist_ok=True)
         self.config_file = os.path.join(self.config_dir, "haproxy.cfg")
 
-    def build_config(self, proxy_servers: List[Dict[str, int]], listen_port: int = 8080) -> str:
+    def build_config(self, proxy_servers: List[Dict[str, int]], listen_port: int = 8080, stats_port: int = 8404) -> str:
         config_lines = [
             "global",
             "    daemon",
@@ -26,6 +26,15 @@ class HAProxyConfigBuilder:
             f"    bind *:{listen_port}",
             "    default_backend tor_proxies",
             "",
+            f"frontend stats_frontend",
+            f"    bind *:{stats_port}",
+            "    stats enable",
+            "    stats uri /stats",
+            "    stats refresh 30s",
+            "    stats hide-version",
+            "    stats realm HAProxy\\ Statistics",
+            "    stats admin if TRUE",
+            "",
             "backend tor_proxies"
         ]
 
@@ -36,16 +45,16 @@ class HAProxyConfigBuilder:
 
         return '\n'.join(config_lines)
 
-    def write_config_file(self, proxy_servers: List[Dict[str, int]], listen_port: int = 8080) -> str:
-        config_content = self.build_config(proxy_servers, listen_port)
+    def write_config_file(self, proxy_servers: List[Dict[str, int]], listen_port: int = 8080, stats_port: int = 8404) -> str:
+        config_content = self.build_config(proxy_servers, listen_port, stats_port)
 
         with open(self.config_file, 'w') as f:
             f.write(config_content)
 
         return self.config_file
 
-    def add_server(self, proxy_servers: List[Dict[str, int]], listen_port: int = 8080):
-        self.write_config_file(proxy_servers, listen_port)
+    def add_server(self, proxy_servers: List[Dict[str, int]], listen_port: int = 8080, stats_port: int = 8404):
+        self.write_config_file(proxy_servers, listen_port, stats_port)
 
     def cleanup_config_file(self):
         try:

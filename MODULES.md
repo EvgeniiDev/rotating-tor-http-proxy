@@ -35,7 +35,7 @@ Manages parallel execution of multiple Tor instances: provides concurrent startu
 Creates Polipo configuration files for SOCKS to HTTP conversion following unified config builder pattern. Generates proxy configs that connect to Tor SOCKS ports and expose HTTP endpoints for each Tor instance. Provides build_config, write_config_file and cleanup_config_files methods.
 
 ## haproxy_config_builder.py
-Generates HAProxy load balancer configuration following unified config builder pattern. Creates unified HTTP proxy endpoint that distributes requests across multiple Polipo instances using round-robin load balancing. Provides build_config, write_config_file and cleanup_config_file methods.
+Generates HAProxy load balancer configuration following unified config builder pattern. Creates unified HTTP proxy endpoint that distributes requests across multiple Polipo instances using round-robin load balancing. Includes stats interface on port 8404 for monitoring and management. Provides build_config, write_config_file and cleanup_config_file methods.
 
 ## proxy_manager.py
 Proxy system manager: orchestrates Tor relay fetching using TorRelayManager, generates configurations using TorConfigBuilder, manages Polipo and HAProxy services, provides health monitoring and graceful shutdown.

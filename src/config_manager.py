@@ -23,8 +23,6 @@ class TorConfigBuilder:
             "ClientOnly 1",
             "UseMicrodescriptors 1",
             "AvoidDiskWrites 1",
-            "FetchHidServDescriptors 0",
-            "LearnCircuitBuildTimeout 0",
             "CircuitBuildTimeout 10",
             f"ExitNodes {','.join(exit_nodes)}",
             "StrictNodes 1",
