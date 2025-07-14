@@ -40,7 +40,10 @@ def main():
     balancer = HTTPLoadBalancer(listen_port=proxy_port)
     manager = TorBalancerManager(config_builder, checker, runner, balancer)
     
+    print("⚠️ TEMPORARY MODE: Exit node filtering is DISABLED - using all nodes without testing")
+    
     try:
+        exit_nodes = []
         exit_nodes_env = os.environ.get('EXIT_NODES', '')
         if exit_nodes_env:
             exit_nodes = exit_nodes_env.split(',')
@@ -55,6 +58,8 @@ def main():
                 limited_nodes = all_exit_nodes[:max_nodes]
                 exit_nodes = [node['ip'] for node in limited_nodes]
                 print(f"Found {len(all_exit_nodes)} total exit nodes, using {len(exit_nodes)} (limit: {max_nodes})")
+            else:
+                print("⚠️ Failed to fetch exit nodes, continuing with empty list")
         
         print(f"Using {len(exit_nodes)} exit nodes for {tor_count} Tor processes")
         

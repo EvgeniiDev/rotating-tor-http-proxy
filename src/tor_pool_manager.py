@@ -20,27 +20,54 @@ class TorBalancerManager:
         self.http_balancer = http_balancer
         self._lock = threading.RLock()
 
+    def _distribute_nodes_simple(self, exit_nodes: list, tor_count: int) -> list:
+        if not exit_nodes:
+            return [[] for _ in range(tor_count)]
+        
+        nodes_per_tor = len(exit_nodes) // tor_count
+        extra_nodes = len(exit_nodes) % tor_count
+        
+        logger.info(f"📊 Simple distribution: {len(exit_nodes)} nodes among {tor_count} Tor processes")
+        logger.info(f"📋 Distribution plan: {nodes_per_tor} nodes per Tor + {extra_nodes} extra")
+        
+        distributed_nodes = []
+        node_index = 0
+        
+        for tor_index in range(tor_count):
+            tor_nodes = []
+            nodes_for_this_tor = nodes_per_tor + (1 if tor_index < extra_nodes else 0)
+            
+            for _ in range(nodes_for_this_tor):
+                if node_index < len(exit_nodes):
+                    tor_nodes.append(exit_nodes[node_index])
+                    node_index += 1
+            
+            distributed_nodes.append(tor_nodes)
+            logger.info(f"🔹 Tor {tor_index + 1}: {len(tor_nodes)} exit nodes assigned")
+        
+        used_nodes = sum(len(nodes) for nodes in distributed_nodes)
+        logger.info(f"📈 Distribution complete: {used_nodes}/{len(exit_nodes)} nodes assigned")
+        
+        return distributed_nodes
+
     def run_pool(self, count: int, exit_nodes: list):
         if not exit_nodes:
             logger.warning("No exit nodes provided")
             return False
             
         logger.info(f"Starting pool with {count} processes using {len(exit_nodes)} exit nodes...")
-        distributed_nodes = self.checker.test_exit_nodes_parallel(exit_nodes, count)
+        logger.info("⚠️ TEMPORARY: Skipping exit node testing - using all nodes without filtering")
         
-        logger.info("✅ Test pool automatically cleaned up after node verification")
+        distributed_nodes = self._distribute_nodes_simple(exit_nodes, count)
         
         if not distributed_nodes or not any(distributed_nodes):
-            logger.error("No working exit nodes found after testing")
+            logger.error("No exit nodes to distribute")
             return False
         
         actual_working_tors = sum(1 for nodes in distributed_nodes if nodes)
         total_working_nodes = sum(len(nodes) for nodes in distributed_nodes)
         
-        if actual_working_tors < count:
-            logger.warning(f"Found nodes for only {actual_working_tors}/{count} Tor processes. Total working nodes: {total_working_nodes}")
-        else:
-            logger.info(f"Successfully distributed {total_working_nodes} working nodes among {actual_working_tors} Tor processes")
+        logger.info(f"Distributed {total_working_nodes} nodes among {actual_working_tors} Tor processes (no testing)")
 
         actual_count = min(count, actual_working_tors)
         ports = [10000 + i for i in range(actual_count)]
@@ -77,11 +104,12 @@ class TorBalancerManager:
             
             if failed_ports and exit_nodes:
                 logger.info(f"Redistributing {len(failed_ports)} failed processes with replacements")
+                logger.info("⚠️ TEMPORARY: Skipping exit node testing for replacements")
                 
                 for port in failed_ports:
                     self.http_balancer.remove_proxy(port)
                 
-                distributed_nodes = self.checker.test_exit_nodes_parallel(
+                distributed_nodes = self._distribute_nodes_simple(
                     exit_nodes, len(failed_ports)
                 )
                 
