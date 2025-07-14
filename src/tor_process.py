@@ -2,7 +2,6 @@ import subprocess
 import tempfile
 import os
 import time
-import threading
 import shutil
 from typing import List
 import signal
@@ -116,9 +115,6 @@ class TorInstance:
         return {'http': f'socks5://127.0.0.1:{self.port}', 'https': f'socks5://127.0.0.1:{self.port}'}
 
     def reconfigure(self, new_exit_nodes: List[str]) -> bool:
-        """
-        Reconfigures the Tor instance with new exit nodes using SIGHUP signal.
-        """
         try:
             self.logger.info(f"Reconfiguring port {self.port} with nodes: {new_exit_nodes}")
             
@@ -131,17 +127,13 @@ class TorInstance:
                 self.logger.error(f"Port {self.port}: Process is not running (poll={poll_result})")
                 return False
                 
-            self.logger.info(f"Port {self.port}: Process is running, updating config")
-            
             self.exit_nodes = new_exit_nodes
             
             with open(self.config_file, 'w') as f:
                 config_content = self.config_builder.build_config(self.port, new_exit_nodes)
                 f.write(config_content)
             
-            self.logger.info(f"Port {self.port}: Config written, sending SIGHUP")
             self.process.send_signal(signal.SIGHUP)
-            self.logger.info(f"Port {self.port}: SIGHUP sent successfully")
             return True
             
         except Exception as e:
