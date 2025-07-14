@@ -1,25 +1,25 @@
 import logging
 import requests
 from typing import List, Dict, Optional
-from utils import is_valid_ipv4
 
 logger = logging.getLogger(__name__)
+
 
 class TorRelayManager:
     """
     Отвечает за получение списка Tor релеев и извлечение exit-нод.
-    
+
     Логика:
     - Загружает данные о Tor релеях из официальных источников
     - Фильтрует и валидирует exit-ноды по критериям (IPv4, политика выхода)
     - Предоставляет списки exit-нод для распределения между Tor процессами
     """
     __slots__ = ('current_relays', 'exit_nodes_by_probability')
-    
+
     def __init__(self):
         self.current_relays = []
         self.exit_nodes_by_probability = []
-    
+
     def fetch_tor_relays(self) -> Optional[Dict]:
         url = (
             "https://onionoo.torproject.org/details?type=relay&running=true&fields="
@@ -58,7 +58,7 @@ class TorRelayManager:
 
             for addr in relay.get('or_addresses', []):
                 ip = addr.split(':')[0]
-                if is_valid_ipv4(ip) and ip not in seen_ips:
+                if ip not in seen_ips:
                     seen_ips.add(ip)
                     exit_nodes.append({
                         'ip': ip,
@@ -74,8 +74,9 @@ class TorRelayManager:
 
         # Сортируем ноды по пропускной способности (от высокой к низкой)
         exit_nodes.sort(key=lambda x: x['observed_bandwidth'], reverse=True)
-        
-        logger.info(f"Found {len(exit_nodes)} qualified exit nodes after filtering")
+
+        logger.info(
+            f"Found {len(exit_nodes)} qualified exit nodes after filtering")
 
         self.current_relays = exit_nodes
         self.exit_nodes_by_probability = exit_nodes
@@ -96,7 +97,8 @@ class TorRelayManager:
 
         num_processes = len(process_ids)
         max_nodes_per_process = 25
-        process_distributions = {pid: {'exit_nodes': [], 'total_probability': 0.0, 'node_count': 0} for pid in process_ids}
+        process_distributions = {pid: {'exit_nodes': [
+        ], 'total_probability': 0.0, 'node_count': 0} for pid in process_ids}
 
         # Разделяем ноды на равные группы по вероятности
         nodes_per_process = len(available_nodes) // num_processes
@@ -105,39 +107,47 @@ class TorRelayManager:
         start_idx = 0
         for i, process_id in enumerate(process_ids):
             # Определяем количество нод для текущего процесса
-            current_nodes_count = nodes_per_process + (1 if i < remainder else 0)
-            
+            current_nodes_count = nodes_per_process + \
+                (1 if i < remainder else 0)
+
             # Берем ноды для текущего процесса
             end_idx = start_idx + current_nodes_count
             process_nodes = available_nodes[start_idx:end_idx]
-            
+
             # Добавляем ноды в процесс (с учетом лимита max_nodes_per_process)
             for node in process_nodes:
                 if process_distributions[process_id]['node_count'] < max_nodes_per_process:
-                    process_distributions[process_id]['exit_nodes'].append(node['ip'])
+                    process_distributions[process_id]['exit_nodes'].append(
+                        node['ip'])
                     process_distributions[process_id]['total_probability'] += node['exit_probability']
                     process_distributions[process_id]['node_count'] += 1
-            
+
             start_idx = end_idx
 
-        total_distributed = sum(data['node_count'] for data in process_distributions.values())
-        logger.info(f"Distributed {total_distributed} nodes across {num_processes} processes")
+        total_distributed = sum(data['node_count']
+                                for data in process_distributions.values())
+        logger.info(
+            f"Distributed {total_distributed} nodes across {num_processes} processes")
 
         if not self.validate_distribution_uniqueness(process_distributions):
-            logger.error("Distribution validation failed - duplicate IPs detected")
+            logger.error(
+                "Distribution validation failed - duplicate IPs detected")
             return {}
 
         return process_distributions
 
     def validate_distribution_uniqueness(self, distributions: Dict[int, Dict]) -> bool:
-        all_assigned_ips = [ip for data in distributions.values() for ip in data.get('exit_nodes', [])]
+        all_assigned_ips = [ip for data in distributions.values()
+                            for ip in data.get('exit_nodes', [])]
         unique_ips = set(all_assigned_ips)
         if len(all_assigned_ips) != len(unique_ips):
             ip_counts = {}
             for ip in all_assigned_ips:
                 ip_counts[ip] = ip_counts.get(ip, 0) + 1
-            duplicates = [(ip, count) for ip, count in ip_counts.items() if count > 1]
-            logger.error(f"Found {len(all_assigned_ips) - len(unique_ips)} duplicate IP assignments:")
+            duplicates = [(ip, count)
+                          for ip, count in ip_counts.items() if count > 1]
+            logger.error(
+                f"Found {len(all_assigned_ips) - len(unique_ips)} duplicate IP assignments:")
             for ip, count in duplicates[:5]:
                 logger.error(f"  IP {ip} assigned {count} times")
             return False

@@ -1,112 +1,62 @@
 #!/usr/bin/env python3
-import os
+
 import logging
-import time
 import signal
 import sys
-
-from http_load_balancer import HTTPLoadBalancer
-from tor_pool_manager import TorBalancerManager
-from config_manager import TorConfigBuilder
-from tor_parallel_runner import TorParallelRunner
-from exit_node_tester import ExitNodeChecker
-from tor_relay_manager import TorRelayManager
-from utils import thread_manager, cleanup_temp_files
+import time
+from proxy_manager import ProxyManager
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-shutdown_requested = False
+logger = logging.getLogger(__name__)
+
+manager = None
 
 def signal_handler(signum, frame):
-    global shutdown_requested
-    print(f"\n🛑 Received signal {signum}, shutting down...")
-    shutdown_requested = True
+    logger.info("Received shutdown signal")
+    if manager:
+        manager.stop_all_services()
+        manager.cleanup_temp_files()
+    sys.exit(0)
 
 def main():
-    global shutdown_requested
+    global manager
+    manager = None
     
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    tor_count = int(os.environ.get('TOR_PROCESSES', '50'))
-    proxy_port = int(os.environ.get('PROXY_PORT', '8080'))
-    
-    config_builder = TorConfigBuilder()
-    checker = ExitNodeChecker(config_builder, 20, test_requests_count=6, required_success_count=3, timeout=30)
-    runner = TorParallelRunner(config_builder, max_workers=20)
-    balancer = HTTPLoadBalancer(listen_port=proxy_port)
-    manager = TorBalancerManager(config_builder, checker, runner, balancer)
-    
-    print("⚠️ TEMPORARY MODE: Exit node filtering is DISABLED - using all nodes without testing")
-    
     try:
-        exit_nodes = []
-        exit_nodes_env = os.environ.get('EXIT_NODES', '')
-        if exit_nodes_env:
-            exit_nodes = exit_nodes_env.split(',')
-            print(f"Using {len(exit_nodes)} exit nodes from environment")
-        else:
-            print("Fetching exit nodes from Tor relay manager...")
-            relay_manager = TorRelayManager()
-            relay_data = relay_manager.fetch_tor_relays()
-            if relay_data:
-                all_exit_nodes = relay_manager.extract_relay_ips(relay_data)
-                max_nodes = tor_count * 7
-                limited_nodes = all_exit_nodes[:max_nodes]
-                exit_nodes = [node['ip'] for node in limited_nodes]
-                print(f"Found {len(all_exit_nodes)} total exit nodes, using {len(exit_nodes)} (limit: {max_nodes})")
-            else:
-                print("⚠️ Failed to fetch exit nodes, continuing with empty list")
+        num_proxies = int(sys.argv[1]) if len(sys.argv) > 1 else 5
+        logger.info(f"Starting proxy manager with {num_proxies} proxies")
         
-        print(f"Using {len(exit_nodes)} exit nodes for {tor_count} Tor processes")
+        manager = ProxyManager(num_proxies=num_proxies)
         
-        print(f"Starting Tor pool with {tor_count} processes...")
-        success = manager.run_pool(count=tor_count, exit_nodes=exit_nodes)
+        logger.info("Initializing proxy manager...")
+        manager.initialize()
         
-        if success:
-            print(f"🌐 HTTP proxy is running on http://localhost:{proxy_port}")
-            while not shutdown_requested:
-                time.sleep(1)
-            
-        else:
-            print("❌ Failed to start pool")
-            
+        logger.info("Starting all services...")
+        manager.start_all_services()
+        
+        logger.info("Proxy system is running. Press Ctrl+C to stop.")
+        logger.info("Load balancer available on http://127.0.0.1:8080")
+        
+        while manager.running:
+            time.sleep(10)
+            status = manager.get_status()
+            logger.info(f"Status: {status['healthy_proxies']}/{status['total_proxies']} proxies healthy, HAProxy: {'OK' if status['haproxy_healthy'] else 'FAILED'}")
+        
     except KeyboardInterrupt:
-        print("\n🛑 Keyboard interrupt received...")
-        shutdown_requested = True
+        logger.info("Shutdown requested")
     except Exception as e:
-        print(f"❌ Error: {e}")
-        shutdown_requested = True
+        logger.error(f"Error: {e}")
     finally:
-        print("🧹 Cleaning up resources...")
-        cleanup_start = time.time()
-        
-        try:
-            if 'checker' in locals():
-                checker.cleanup()
-        except Exception as e:
-            print(f"Warning: Error during checker cleanup: {e}")
-        
-        try:
-            if 'manager' in locals():
-                manager.stop()
-        except Exception as e:
-            print(f"Warning: Error during manager stop: {e}")
-        
-        try:
-            thread_manager.shutdown_all(timeout=30)
-        except Exception as e:
-            print(f"Warning: Error during thread manager shutdown: {e}")
-        
-        cleanup_temp_files()
-        
-        cleanup_time = time.time() - cleanup_start
-        print(f"✅ Pool stopped (cleanup took {cleanup_time:.1f}s)")
-        
-        sys.exit(0)
+        if manager:
+            manager.stop_all_services()
+            manager.cleanup_temp_files()
 
 if __name__ == "__main__":
     main()

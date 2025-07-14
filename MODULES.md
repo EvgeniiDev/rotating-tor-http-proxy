@@ -5,7 +5,7 @@ This document describes each module in the project and their relationships.
 ---
 
 ## config_manager.py
-Loads and validates configuration settings (files or environment). Provides parameters consumed by all other modules.
+Contains TorConfigBuilder class following unified config builder pattern: generates Tor configuration files with optional exit nodes, manages config directories, provides file writing and cleanup methods. Follows same API pattern as PolipoConfigBuilder and HAProxyConfigBuilder.
 
 ## utils.py
 Common utility functions (e.g., safe thread shutdown). Used by pool manager for cleanup.
@@ -31,6 +31,21 @@ Application entry point: initializes configuration, relay manager, load balancer
 ## tor_parallel_runner.py
 Manages parallel execution of multiple Tor instances: provides concurrent startup, monitoring, and lifecycle management for up to 20 Tor processes. Integrates with tor_pool_manager for scalable proxy pool operations.
 
+## polipo_config_builder.py
+Creates Polipo configuration files for SOCKS to HTTP conversion following unified config builder pattern. Generates proxy configs that connect to Tor SOCKS ports and expose HTTP endpoints for each Tor instance. Provides build_config, write_config_file and cleanup_config_files methods.
+
+## haproxy_config_builder.py
+Generates HAProxy load balancer configuration following unified config builder pattern. Creates unified HTTP proxy endpoint that distributes requests across multiple Polipo instances using round-robin load balancing. Provides build_config, write_config_file and cleanup_config_file methods.
+
+## proxy_manager.py
+Proxy system manager: orchestrates Tor relay fetching using TorRelayManager, generates configurations using TorConfigBuilder, manages Polipo and HAProxy services, provides health monitoring and graceful shutdown.
+
+## main.py
+Entry point for proxy system. Initializes ProxyManager, handles signals, provides status monitoring and cleanup operations.
+
+## test_proxy_system.py
+Test script for proxy system. Validates proxy functionality by making HTTP requests through the load balancer endpoint.
+
 ---
 
 # Module Relationships
@@ -45,6 +60,13 @@ Manages parallel execution of multiple Tor instances: provides concurrent startu
            ├ tor_parallel_runner.py
            ├ exit_node_tester.py (reconfigurable approach)
            └ utils.py
+
+ main.py
+    └ proxy_manager.py
+           ├ tor_relay_manager.py (reused)
+           ├ config_manager.py (TorConfigBuilder reused)
+           ├ polipo_config_builder.py (new)
+           └ haproxy_config_builder.py (new)
 ```
 
 - `main.py` wires up all components with optimized configuration.
@@ -53,3 +75,6 @@ Manages parallel execution of multiple Tor instances: provides concurrent startu
 - `exit_node_tester` implements resource-efficient parallel testing using process pools and SIGHUP reconfiguration.
 - `tor_process` provides advanced process control with hot-reload capabilities via `reconfigure()` method.
 - `utils` provides helpers for thread and process management across modules.
+- `main.py` provides system entry point and signal handling.
+- `proxy_manager.py` orchestrates the complete proxy system using reused and new components.
+- `polipo_config_builder.py` and `haproxy_config_builder.py` provide new HTTP proxy and load balancing capabilities.
