@@ -40,16 +40,21 @@ def check_system_dependencies():
     """Check if required system dependencies are available."""
     import subprocess
     
-    dependencies = ['tor', 'polipo', 'haproxy']
+    dependencies = {
+        'tor': ['--version'],
+        'polipo': ['-v'],
+        'haproxy': ['-v']
+    }
     missing = []
     
-    for dep in dependencies:
+    for dep, args in dependencies.items():
         try:
-            subprocess.run([dep, '--version'], 
+            result = subprocess.run([dep] + args, 
                          capture_output=True, 
-                         check=True, 
                          timeout=5)
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+            if result.returncode != 0:
+                missing.append(dep)
+        except (subprocess.TimeoutExpired, FileNotFoundError):
             missing.append(dep)
     
     return missing
