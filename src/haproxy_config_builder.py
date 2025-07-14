@@ -45,7 +45,8 @@ class HAProxyConfigBuilder:
         return '\n'.join(config_lines) + '\n'
 
     def write_config_file(self, proxy_servers: List[Dict[str, int]], listen_port: int = 8080, stats_port: int = 8404) -> str:
-        config_content = self.build_config(proxy_servers, listen_port, stats_port)
+        config_content = self.build_config(
+            proxy_servers, listen_port, stats_port)
 
         with open(self.config_file, 'w') as f:
             f.write(config_content)

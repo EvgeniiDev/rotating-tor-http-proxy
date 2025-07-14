@@ -16,18 +16,38 @@ class TorConfigBuilder:
         config_lines = [
             f"SocksPort 127.0.0.1:{socks_port}",
             f"DataDirectory {data_path}",
-            "MaxCircuitDirtiness 10",
-            "NewCircuitPeriod 10",
+            "MaxCircuitDirtiness 30",
+            "NewCircuitPeriod 30",
             "ExitRelay 0",
             "RefuseUnknownExits 0",
             "ClientOnly 1",
             "UseMicrodescriptors 1",
             "AvoidDiskWrites 1",
-            "CircuitBuildTimeout 10",
-            f"ExitNodes {','.join(exit_nodes)}",
-            "StrictNodes 1",
-            "EnforceDistinctSubnets 0",
+            "CircuitBuildTimeout 30",
+            "LearnCircuitBuildTimeout 0",
+            "CircuitStreamTimeout 20",
+            "ConnLimit 1000",
+            "NumEntryGuards 3",
+            "NumDirectoryGuards 3",
+            "GuardLifetime 30 days",
+            "MaxCircuitsPending 32",
+            "KeepalivePeriod 60",
+            "SocksTimeout 300",
+            "ClientBootstrapConsensusAuthorityDownloadInitialDelay 6",
+            "ClientBootstrapConsensusFallbackDownloadInitialDelay 6",
+            "TestSocks 0",
+            "WarnUnsafeSocks 0",
+            "SafeSocks 1",
         ]
+        
+        # Only add ExitNodes if we have them
+        if exit_nodes:
+            config_lines.extend([
+                f"ExitNodes {','.join(exit_nodes)}",
+                "StrictNodes 1",
+            ])
+        
+        config_lines.append("EnforceDistinctSubnets 0")
 
         return '\n'.join(config_lines) + '\n'
 

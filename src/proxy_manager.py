@@ -24,20 +24,40 @@ class ProxyService:
 
     def start(self):
         try:
+            # Pre-check port availability
+            if not is_port_available('127.0.0.1', self.tor_port):
+                logger.error(f"Port {self.tor_port} is already in use, cannot start Tor")
+                return
+            
+            if not is_port_available('127.0.0.1', self.http_port):
+                logger.error(f"Port {self.http_port} is already in use, cannot start Polipo")
+                return
+
             logger.debug(f"Starting Tor process with config: {self.tor_config}")
             self.tor_process = subprocess.Popen([
                 'tor', '-f', self.tor_config
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-            # Wait a bit longer for Tor to initialize
-            time.sleep(5)
+            # Wait for Tor to initialize with progressive checks
+            max_wait_time = 15
+            check_interval = 1
             
-            # Check if Tor started successfully
-            if self.tor_process.poll() is not None:
-                stdout, stderr = self.tor_process.communicate()
-                logger.error(f"Tor failed to start on port {self.tor_port}")
-                logger.error(f"Tor stderr: {stderr.decode()[:500]}")
-                return
+            for wait_time in range(0, max_wait_time, check_interval):
+                time.sleep(check_interval)
+                
+                if self.tor_process.poll() is not None:
+                    stdout, stderr = self.tor_process.communicate()
+                    logger.error(f"Tor failed to start on port {self.tor_port}")
+                    logger.error(f"Tor stdout: {stdout.decode()[:500]}")
+                    logger.error(f"Tor stderr: {stderr.decode()[:500]}")
+                    return
+                
+                # Check if port is now in use (indicating Tor is listening)
+                if not is_port_available('127.0.0.1', self.tor_port):
+                    logger.debug(f"Tor successfully bound to port {self.tor_port}")
+                    break
+            else:
+                logger.warning(f"Tor on port {self.tor_port} may not be fully ready after {max_wait_time}s")
 
             logger.debug(f"Starting Polipo process with config: {self.polipo_config}")
             self.polipo_process = subprocess.Popen([
@@ -45,7 +65,7 @@ class ProxyService:
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             # Wait for Polipo to initialize
-            time.sleep(2)
+            time.sleep(3)
             
             # Check if Polipo started successfully
             if self.polipo_process.poll() is not None:
@@ -133,29 +153,44 @@ class ProxyManager:
         self.running = False
 
     def initialize(self):
-        # Check port availability
+        # Check port availability and find alternatives if needed
         logger.info("Checking port availability...")
-        used_ports = []
+        adjusted_ports = []
+        
         for i in range(self.num_proxies):
             tor_port = self.base_tor_port + i
             http_port = self.base_http_port + i
             
+            # Find available Tor port
             if not is_port_available('127.0.0.1', tor_port):
-                used_ports.append(f"Tor port {tor_port}")
+                try:
+                    from utils import find_available_port
+                    tor_port = find_available_port('127.0.0.1', tor_port + 1000)
+                    logger.warning(f"Tor port {self.base_tor_port + i} in use, using {tor_port} instead")
+                except RuntimeError:
+                    raise Exception(f"Cannot find available port for Tor instance {i}")
+            
+            # Find available HTTP port
             if not is_port_available('127.0.0.1', http_port):
-                used_ports.append(f"HTTP port {http_port}")
+                try:
+                    from utils import find_available_port
+                    http_port = find_available_port('127.0.0.1', http_port + 1000)
+                    logger.warning(f"HTTP port {self.base_http_port + i} in use, using {http_port} instead")
+                except RuntimeError:
+                    raise Exception(f"Cannot find available port for HTTP instance {i}")
+            
+            adjusted_ports.append((tor_port, http_port))
         
         # Check HAProxy ports
-        if not is_port_available('127.0.0.1', 8080):
-            used_ports.append("HAProxy main port 8080")
-        if not is_port_available('127.0.0.1', 8404):
-            used_ports.append("HAProxy stats port 8404")
-            
-        if used_ports:
-            logger.warning(f"Some ports are already in use: {', '.join(used_ports)}")
-            logger.warning("This may cause startup failures. Consider stopping other services or changing ports.")
-        else:
-            logger.info("All required ports are available")
+        haproxy_main_port = 8080
+        haproxy_stats_port = 8404
+        
+        if not is_port_available('127.0.0.1', haproxy_main_port):
+            logger.warning(f"HAProxy main port {haproxy_main_port} is in use")
+        if not is_port_available('127.0.0.1', haproxy_stats_port):
+            logger.warning(f"HAProxy stats port {haproxy_stats_port} is in use")
+        
+        logger.info("All required ports checked and adjusted if necessary")
         
         logger.info("Fetching Tor relay information...")
         relay_data = self.relay_manager.fetch_tor_relays()
@@ -174,8 +209,7 @@ class ProxyManager:
         proxy_servers = []
 
         for i in range(self.num_proxies):
-            tor_port = self.base_tor_port + i
-            http_port = self.base_http_port + i
+            tor_port, http_port = adjusted_ports[i]
 
             distribution_data = distributions.get(i, {})
             exit_node_ips = distribution_data.get('exit_nodes', []) if isinstance(distribution_data, dict) else []
@@ -204,20 +238,56 @@ class ProxyManager:
 
     def start_all_services(self):
         logger.info("Starting all proxy services...")
-
+        failed_services = []
+        
         for i, service in enumerate(self.proxy_services):
-            logger.info(
-                f"Starting proxy service {i+1}/{len(self.proxy_services)}")
+            logger.info(f"Starting proxy service {i+1}/{len(self.proxy_services)}")
             service.start()
 
             if not service.is_healthy():
                 logger.warning(f"Proxy service {i+1} failed to start properly")
+                failed_services.append(i)
+                
+                # Add small delay before next attempt to avoid resource conflicts
+                time.sleep(2)
+
+        # Retry failed services with different strategy
+        if failed_services:
+            logger.info(f"Retrying {len(failed_services)} failed services...")
+            for i in failed_services:
+                service = self.proxy_services[i]
+                logger.info(f"Retrying proxy service {i+1}...")
+                
+                # Stop and cleanup first
+                service.stop()
+                time.sleep(3)
+                
+                # Try starting again
+                service.start()
+                
+                if service.is_healthy():
+                    logger.info(f"Successfully restarted proxy service {i+1}")
+                    failed_services.remove(i)
+                else:
+                    logger.error(f"Proxy service {i+1} failed again on retry")
+
+        healthy_count = sum(1 for service in self.proxy_services if service.is_healthy())
+        logger.info(f"Started {healthy_count}/{len(self.proxy_services)} proxy services successfully")
 
         logger.info("Starting HAProxy load balancer...")
         try:
             self.haproxy_process = subprocess.Popen([
                 'haproxy', '-f', self.haproxy_config_builder.config_file
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+            # Wait a moment and check if HAProxy started successfully
+            time.sleep(2)
+            if self.haproxy_process.poll() is not None:
+                stdout, stderr = self.haproxy_process.communicate()
+                logger.error(f"HAProxy failed to start")
+                logger.error(f"HAProxy stdout: {stdout.decode()[:500]}")
+                logger.error(f"HAProxy stderr: {stderr.decode()[:500]}")
+                return
 
             self.running = True
             logger.info("HAProxy started successfully")
@@ -318,3 +388,26 @@ class ProxyManager:
                 logger.info("HAProxy restarted")
             except Exception as e:
                 logger.error(f"Failed to restart HAProxy: {e}")
+
+    def force_cleanup_ports(self):
+        """Force cleanup of all ports that will be used by the proxy services."""
+        logger.info("Force cleaning up ports...")
+        
+        ports_to_clean = []
+        
+        # Add all Tor and HTTP ports
+        for service in self.proxy_services:
+            ports_to_clean.extend([service.tor_port, service.http_port])
+        
+        # Add HAProxy ports
+        ports_to_clean.extend([8080, 8404])
+        
+        from utils import ensure_port_available
+        
+        for port in ports_to_clean:
+            if not ensure_port_available('127.0.0.1', port, force_kill=True):
+                logger.warning(f"Could not free port {port}")
+            else:
+                logger.debug(f"Port {port} is now available")
+        
+        logger.info("Port cleanup completed")

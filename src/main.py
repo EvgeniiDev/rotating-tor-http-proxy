@@ -35,11 +35,32 @@ def main():
         
         manager = ProxyManager(num_proxies=num_proxies)
         
+        # Auto-fix port conflicts before initializing
+        logger.info("Checking for port conflicts...")
+        from utils import ensure_port_available
+        
+        # Clean up any conflicting processes
+        manager.force_cleanup_ports()
+        
+        # Wait for ports to be fully released
+        time.sleep(3)
+        
         logger.info("Initializing proxy manager...")
         manager.initialize()
         
         logger.info("Starting all services...")
         manager.start_all_services()
+        
+        # Check if we need to retry any failed services
+        status = manager.get_status()
+        if status['healthy_proxies'] < status['total_proxies']:
+            logger.warning("Some services failed to start, running diagnostics and retrying...")
+            manager.diagnose_issues()
+            manager.restart_failed_services()
+            
+            # Final status check
+            final_status = manager.get_status()
+            logger.info(f"Final status: {final_status['healthy_proxies']}/{final_status['total_proxies']} proxies healthy")
         
         logger.info("Proxy system is running. Press Ctrl+C to stop.")
         logger.info("Load balancer available on http://127.0.0.1:8080")
