@@ -43,11 +43,27 @@ def main():
         
         logger.info("Proxy system is running. Press Ctrl+C to stop.")
         logger.info("Load balancer available on http://127.0.0.1:8080")
+        logger.info("HAProxy admin interface available on http://127.0.0.1:8404/stats")
         
+        # Initial diagnosis after startup
+        time.sleep(5)
+        manager.diagnose_issues()
+        
+        status_check_count = 0
         while manager.running:
             time.sleep(10)
             status = manager.get_status()
             logger.info(f"Status: {status['healthy_proxies']}/{status['total_proxies']} proxies healthy, HAProxy: {'OK' if status['haproxy_healthy'] else 'FAILED'}")
+            
+            # Detailed diagnosis every 5 status checks (50 seconds)
+            status_check_count += 1
+            if status_check_count % 5 == 0:
+                manager.diagnose_issues()
+                
+                # Auto-restart failed services if more than half are unhealthy
+                if status['healthy_proxies'] < status['total_proxies'] // 2:
+                    logger.warning("More than half of services are unhealthy, attempting restart...")
+                    manager.restart_failed_services()
         
     except KeyboardInterrupt:
         logger.info("Shutdown requested")
