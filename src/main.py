@@ -35,7 +35,7 @@ def main():
     proxy_port = int(os.environ.get('PROXY_PORT', '8080'))
     
     config_builder = TorConfigBuilder()
-    checker = ExitNodeChecker(test_requests_count=6, required_success_count=3, timeout=30, config_builder=config_builder, max_workers=20)
+    checker = ExitNodeChecker(config_builder, 20, test_requests_count=6, required_success_count=3, timeout=30)
     runner = TorParallelRunner(config_builder, max_workers=20)
     balancer = HTTPLoadBalancer(listen_port=proxy_port)
     manager = TorBalancerManager(config_builder, checker, runner, balancer)
@@ -51,7 +51,7 @@ def main():
             relay_data = relay_manager.fetch_tor_relays()
             if relay_data:
                 all_exit_nodes = relay_manager.extract_relay_ips(relay_data)
-                max_nodes = tor_count * 6
+                max_nodes = tor_count * 7
                 limited_nodes = all_exit_nodes[:max_nodes]
                 exit_nodes = [node['ip'] for node in limited_nodes]
                 print(f"Found {len(all_exit_nodes)} total exit nodes, using {len(exit_nodes)} (limit: {max_nodes})")

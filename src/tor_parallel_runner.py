@@ -14,9 +14,9 @@ class TorParallelRunner:
     - Управляет жизненным циклом каждого процесса (старт/стоп/рестарт)
     - Предоставляет thread-safe доступ к статусам всех процессов
     """
-    def __init__(self, config_builder, max_workers: int = 10):
+    def __init__(self, config_builder, max_workers: int):
         self.config_builder = config_builder
-        self.max_workers = min(max_workers, 10)
+        self.max_workers = max_workers
         self.instances: Dict[int, TorInstance] = {}
         self._lock = threading.RLock()
         self.logger = logging.getLogger(__name__)

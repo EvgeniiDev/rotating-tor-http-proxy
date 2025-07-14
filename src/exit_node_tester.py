@@ -17,9 +17,9 @@ class ExitNodeChecker:
     - Проверяет доступность целевого URL через каждую ноду
     - Возвращает список рабочих нод для использования в пуле
     """
-    def __init__(self, test_url: str = "https://steamcommunity.com/market/search?appid=730", 
+    def __init__(self, config_builder, max_workers: int, test_url: str = "https://steamcommunity.com/market/search?appid=730", 
                  test_requests_count: int = 2, required_success_count: int = 1, 
-                 timeout: int = 30, config_builder=None, max_workers: int = 20):
+                 timeout: int = 30):
         self.test_url = test_url
         self.test_requests_count = test_requests_count
         self.required_success_count = required_success_count
