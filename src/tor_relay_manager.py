@@ -14,7 +14,6 @@ class TorRelayManager:
     - Фильтрует и валидирует exit-ноды по критериям (IPv4, политика выхода)
     - Предоставляет списки exit-нод для распределения между Tor процессами
     """
-    __slots__ = ('current_relays', 'exit_nodes_by_probability')
 
     def __init__(self):
         self.current_relays = []

@@ -36,25 +36,4 @@ def find_available_port(host: str, start_port: int, max_attempts: int = 100) -> 
     raise RuntimeError(f"Could not find available port starting from {start_port}")
 
 
-def check_system_dependencies():
-    """Check if required system dependencies are available."""
-    import subprocess
-    
-    dependencies = {
-        'tor': ['--version'],
-        'polipo': ['-v'],
-        'haproxy': ['-v']
-    }
-    missing = []
-    
-    for dep, args in dependencies.items():
-        try:
-            result = subprocess.run([dep] + args, 
-                         capture_output=True, 
-                         timeout=5)
-            if result.returncode != 0:
-                missing.append(dep)
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            missing.append(dep)
-    
-    return missing
+

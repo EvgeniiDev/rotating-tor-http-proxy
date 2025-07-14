@@ -7,7 +7,7 @@ from tor_relay_manager import TorRelayManager
 from tor_config_builder import TorConfigBuilder
 from polipo_config_builder import PolipoConfigBuilder
 from haproxy_config_builder import HAProxyConfigBuilder
-from utils import check_system_dependencies, is_port_available
+from utils import is_port_available
 
 logger = logging.getLogger(__name__)
 
@@ -133,13 +133,6 @@ class ProxyManager:
         self.running = False
 
     def initialize(self):
-        # Check system dependencies first
-        logger.info("Checking system dependencies...")
-        missing_deps = check_system_dependencies()
-        if missing_deps:
-            raise Exception(f"Missing system dependencies: {', '.join(missing_deps)}. Please install them first.")
-        logger.info("All system dependencies are available")
-        
         # Check port availability
         logger.info("Checking port availability...")
         used_ports = []
