@@ -5,7 +5,6 @@ import time
 import threading
 import shutil
 from typing import List
-from datetime import datetime
 import signal
 import requests
 import logging
@@ -18,7 +17,6 @@ class TorInstance:
     - Создает конфигурацию и запускает/останавливает процесс Tor
     - Проверяет здоровье процесса через SOCKS соединение
     - Поддерживает горячую перезагрузку exit-нод через SIGHUP без перезапуска
-    - Отслеживает IP адрес выхода и количество ошибок
     """
     def __init__(self, port: int, exit_nodes: List[str], config_builder):
         self.port = port
@@ -27,12 +25,6 @@ class TorInstance:
         self.process = None
         self.config_file = None
         self.is_running = False
-        self.failed_checks = 0
-        self.max_failures = 3
-        self.last_check = None
-        self.current_exit_ip = None
-        self._health_thread = None
-        self._stop_health = threading.Event()
         self.logger = logging.getLogger(__name__)
 
     def create_config(self):
@@ -68,14 +60,6 @@ class TorInstance:
                 self.is_running = False
                 return False
             
-            self._stop_health.clear()
-            self._health_thread = threading.Thread(target=self._health_monitor, daemon=True, name=f"HealthMonitor-{self.port}")
-            self._health_thread.start()
-            
-            # Регистрируем поток
-            from utils import register_thread
-            register_thread(self._health_thread, "health_monitor")
-            
             return True
             
         except Exception as e:
@@ -84,17 +68,6 @@ class TorInstance:
 
     def stop(self):
         self.logger.info(f"Stopping Tor instance on port {self.port}")
-        self._stop_health.set()
-        
-        if self._health_thread and self._health_thread.is_alive():
-            self.logger.debug(f"Waiting for health monitor thread to stop for port {self.port}")
-            self._health_thread.join(timeout=5)
-            if self._health_thread.is_alive():
-                self.logger.warning(f"Health monitor thread for port {self.port} did not stop gracefully")
-            else:
-                # Удаляем из реестра
-                from utils import unregister_thread
-                unregister_thread(self._health_thread)
         
         if self.process and self.process.poll() is None:
             try:
@@ -109,7 +82,6 @@ class TorInstance:
         
         self.process = None
         self.is_running = False
-        self._health_thread = None
         
         if self.config_file and os.path.exists(self.config_file):
             os.unlink(self.config_file)
@@ -118,18 +90,6 @@ class TorInstance:
         data_dir = os.path.expanduser(f'~/tor-http-proxy/data/data_{self.port}')
         if os.path.exists(data_dir):
             shutil.rmtree(data_dir, ignore_errors=True)
-
-    def _health_monitor(self):
-        self.logger.debug(f"Starting health monitor for port {self.port}")
-        while not self._stop_health.is_set():
-            try:
-                self.check_health()
-            except Exception as e:
-                self.logger.error(f"Health monitor error for port {self.port}: {e}")
-            
-            if self._stop_health.wait(timeout=5):
-                break
-        self.logger.debug(f"Health monitor stopped for port {self.port}")
 
     def check_health(self) -> bool:
         if not self.process:
@@ -146,27 +106,14 @@ class TorInstance:
         try:
             response = requests.get(url, proxies=self.get_proxies(), timeout=60)
             if response.status_code == 200:
-                self.current_exit_ip = response.json().get('ip')
-                self.failed_checks = 0
-                self.last_check = datetime.now()
                 return True
         except Exception as e:
             self.logger.debug(f"Port {self.port}: Health check failed: {e}")
             pass
-        self.failed_checks += 1
         return False
 
     def get_proxies(self) -> dict:
         return {'http': f'socks5://127.0.0.1:{self.port}', 'https': f'socks5://127.0.0.1:{self.port}'}
-
-    def get_status(self) -> dict:
-        return {
-            'port': self.port,
-            'is_running': self.is_running,
-            'current_exit_ip': self.current_exit_ip,
-            'last_check': self.last_check,
-            'failed_checks': self.failed_checks
-        }
 
     def reconfigure(self, new_exit_nodes: List[str]) -> bool:
         """

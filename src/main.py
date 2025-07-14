@@ -11,7 +11,7 @@ from config_manager import TorConfigBuilder
 from tor_parallel_runner import TorParallelRunner
 from exit_node_tester import ExitNodeChecker
 from tor_relay_manager import TorRelayManager
-from utils import thread_manager, cleanup_temp_files, get_thread_count_by_category, cleanup_dead_threads
+from utils import thread_manager, cleanup_temp_files
 
 logging.basicConfig(
     level=logging.INFO,
@@ -62,22 +62,8 @@ def main():
         success = manager.run_pool(count=tor_count, exit_nodes=exit_nodes)
         
         if success:
-            print("✅ Pool started successfully!")
             print(f"🌐 HTTP proxy is running on http://localhost:{proxy_port}")
-            
-            # Мониторинг потоков
-            monitor_interval = 30
-            last_monitor = 0
-        
             while not shutdown_requested:
-                current_time = time.time()
-                if current_time - last_monitor >= monitor_interval:
-                    cleanup_dead_threads()
-                    thread_counts = get_thread_count_by_category()
-                    if thread_counts:
-                        print(f"📊 Thread status: {thread_counts}")
-                    last_monitor = current_time
-                
                 time.sleep(1)
             
         else:

@@ -140,12 +140,12 @@ class TorParallelRunner:
 
     def get_statuses(self) -> Dict[int, dict]:
         with self._lock:
-            return {port: inst.get_status() for port, inst in self.instances.items()}
+            return {port: {'port': port, 'is_running': inst.is_running} for port, inst in self.instances.items()}
 
     def restart_failed(self):
         with self._lock:
             for port, inst in list(self.instances.items()):
-                if inst.failed_checks >= inst.max_failures:
+                if not inst.is_running:
                     inst.stop()
                     inst.create_config()
                     inst.start()

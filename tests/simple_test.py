@@ -44,8 +44,7 @@ def test_simple_architecture():
         print("🏥 Checking Tor health...")
         if tor_instance.check_health():
             print("✅ Tor is healthy!")
-            status = tor_instance.get_status()
-            print(f"📊 Status: {status}")
+            print(f"📊 Port: {tor_instance.port}, Running: {tor_instance.is_running}")
         else:
             print("❌ Tor health check failed")
             return False

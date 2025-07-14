@@ -76,12 +76,12 @@ class TestTorParallelRunner(unittest.TestCase):
         """Test that get_statuses returns correct status data"""
         # Mock TorInstance
         mock_instance1 = Mock()
-        mock_instance1.get_status.return_value = {'port': 9050, 'is_running': True}
+        mock_instance1.is_running = True
         mock_instance1.create_config.return_value = True
         mock_instance1.start.return_value = True
         
         mock_instance2 = Mock()
-        mock_instance2.get_status.return_value = {'port': 9051, 'is_running': False}
+        mock_instance2.is_running = False
         mock_instance2.create_config.return_value = True
         mock_instance2.start.return_value = True
         
@@ -120,17 +120,15 @@ class TestTorParallelRunner(unittest.TestCase):
         
     @patch('tor_parallel_runner.TorInstance')
     def test_restart_failed_restarts_only_failed_instances(self, mock_tor_instance):
-        """Test that restart_failed only restarts instances with too many failures"""
+        """Test that restart_failed only restarts instances that are not running"""
         # Mock TorInstance
         mock_instance1 = Mock()
-        mock_instance1.failed_checks = 5  # Failed
-        mock_instance1.max_failures = 3
+        mock_instance1.is_running = False  # Failed
         mock_instance1.create_config.return_value = True
         mock_instance1.start.return_value = True
         
         mock_instance2 = Mock()
-        mock_instance2.failed_checks = 1  # Healthy
-        mock_instance2.max_failures = 3
+        mock_instance2.is_running = True  # Healthy
         mock_instance2.create_config.return_value = True
         mock_instance2.start.return_value = True
         

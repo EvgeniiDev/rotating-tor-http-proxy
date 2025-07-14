@@ -64,7 +64,7 @@ class TorBalancerManager:
         """
         with self._lock:
             statuses = self.runner.get_statuses()
-            failed_ports = [port for port, status in statuses.items() if status.get('failed_checks', 0) >= 3]
+            failed_ports = [port for port, status in statuses.items() if not status.get('is_running', False)]
             if failed_ports:
                 logger.info(f"Removing {len(failed_ports)} failed processes from balancer")
                 for port in failed_ports:
@@ -73,7 +73,7 @@ class TorBalancerManager:
     def redistribute_with_replacements(self, exit_nodes: list):
         with self._lock:
             statuses = self.runner.get_statuses()
-            failed_ports = [port for port, status in statuses.items() if status.get('failed_checks', 0) >= 3]
+            failed_ports = [port for port, status in statuses.items() if not status.get('is_running', False)]
             
             if failed_ports and exit_nodes:
                 logger.info(f"Redistributing {len(failed_ports)} failed processes with replacements")

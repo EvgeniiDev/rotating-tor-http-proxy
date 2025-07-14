@@ -33,21 +33,15 @@ class ExitNodeChecker:
 
     def test_node(self, proxy: dict) -> bool:
         success_count = 0
-        logger.info(f"Testing proxy {proxy} with {self.test_requests_count} requests")
-        
         for request_num in range(self.test_requests_count):
             try:
                 response = requests.get(self.test_url, proxies=proxy, timeout=self.timeout)
                 if response.status_code == 200:
                     success_count += 1
-                    logger.info(f"Request {request_num + 1}/{self.test_requests_count}: SUCCESS (total: {success_count})")
                     if success_count >= self.required_success_count:
                         logger.info(f"Node test PASSED: {success_count}/{self.test_requests_count} successful requests")
                         return True
-                else:
-                    logger.warning(f"Request {request_num + 1}/{self.test_requests_count}: HTTP {response.status_code}")
             except Exception as e:
-                logger.warning(f"Request {request_num + 1}/{self.test_requests_count}: ERROR {e}")
                 continue
         
         result = success_count >= self.required_success_count
@@ -81,8 +75,7 @@ class ExitNodeChecker:
                     working_nodes.extend(batch_results)
                     total_tested += len(batch)
                     success_rate = len(working_nodes) / total_tested * 100 if total_tested > 0 else 0
-                    
-                    logger.info(f"Batch {batch_num} completed: {len(batch_results)}/{len(batch)} passed")
+
                     logger.info(f"Progress: {len(working_nodes)}/{total_tested} total working nodes ({success_rate:.1f}%)")
                     
                     if len(working_nodes) >= total_target_nodes:
@@ -130,13 +123,9 @@ class ExitNodeChecker:
         
         logger.info(f"Started instances: {list(self.batch_runner.instances.keys())}")
         for port, instance in self.batch_runner.instances.items():
-            status = instance.get_status()
-            logger.info(f"Port {port}: running={instance.is_running}, status={status}")
+            logger.info(f"Port {port}: running={instance.is_running}")
 
     def _test_batch_with_reconfigure(self, exit_nodes: List[str]) -> List[str]:
-        logger.info(f"Testing batch with {len(exit_nodes)} exit nodes using parallel reconfiguration")
-        logger.info(f"Available instances: {list(self.batch_runner.instances.keys())}")
-        
         if self._shutdown_event.is_set():
             logger.warning("Shutdown event set, skipping batch test")
             return []
