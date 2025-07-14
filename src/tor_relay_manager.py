@@ -55,8 +55,19 @@ class TorRelayManager:
             if not self._check_node_stability(relay):
                 continue
 
+            # Extract and validate IPv4 addresses only
             for addr in relay.get('or_addresses', []):
                 ip = addr.split(':')[0]
+
+                # Remove IPv6 brackets if present and skip IPv6 addresses
+                if ip.startswith('['):
+                    continue  # Skip IPv6 addresses
+
+                # Import and use the IPv4 validation function
+                from utils import is_valid_ipv4
+                if not is_valid_ipv4(ip):
+                    continue  # Skip invalid IPv4 addresses
+
                 if ip not in seen_ips:
                     seen_ips.add(ip)
                     exit_nodes.append({
@@ -69,7 +80,7 @@ class TorRelayManager:
                         'last_seen': relay.get('last_seen', ''),
                         'exit_policy_summary': exit_policy
                     })
-                    break
+                    break  # Only take the first valid IPv4 address per relay
 
         # Сортируем ноды по пропускной способности (от высокой к низкой)
         exit_nodes.sort(key=lambda x: x['observed_bandwidth'], reverse=True)
@@ -81,7 +92,7 @@ class TorRelayManager:
         self.exit_nodes_by_probability = exit_nodes
         return exit_nodes
 
-    def distribute_exit_nodes(self, num_processes: int) -> Dict[int, List[str]]:
+    def distribute_exit_nodes(self, num_processes: int) -> Dict[int, Dict]:
         if not self.exit_nodes_by_probability:
             logger.warning("No exit nodes available for distribution")
             return {}

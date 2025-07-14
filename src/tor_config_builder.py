@@ -13,6 +13,16 @@ class TorConfigBuilder:
         data_path = os.path.join(self.data_dir, f"data_{socks_port}")
         os.makedirs(data_path, exist_ok=True)
 
+        # Filter and validate exit nodes to ensure they are valid IPv4 addresses
+        from utils import is_valid_ipv4
+        valid_exit_nodes = [ip for ip in exit_nodes if is_valid_ipv4(ip)]
+
+        if len(valid_exit_nodes) != len(exit_nodes):
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"Filtered out {len(exit_nodes) - len(valid_exit_nodes)} invalid IP addresses from exit nodes")
+
         config_lines = [
             f"SocksPort 127.0.0.1:{socks_port}",
             f"DataDirectory {data_path}",
