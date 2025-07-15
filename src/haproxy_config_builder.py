@@ -12,24 +12,34 @@ class HAProxyConfigBuilder:
         config_lines = [
             "global",
             "    maxconn 4096",
+            "    tune.bufsize 32768",
+            "    tune.maxrewrite 1024",
             "",
             "defaults",
             "    mode http",
-            "    timeout connect 5000ms",
-            "    timeout client 50000ms",
-            "    timeout server 50000ms",
+            "    timeout connect 30000ms",
+            "    timeout client 300000ms",
+            "    timeout server 300000ms",
+            "    timeout http-request 60000ms",
+            "    timeout http-keep-alive 60000ms",
+            "    timeout queue 30000ms",
             "    option httplog",
             "    option dontlognull",
             "    option log-health-checks",
             "    option redispatch",
             "    option log-separate-errors",
             "    option abortonclose",
+            "    option http-server-close",
+            "    option forwardfor",
             "    balance roundrobin",
+            "    retries 3",
             "    log global",
             "",
             "frontend http_frontend",
             f"    bind 0.0.0.0:{listen_port}",
             "    default_backend tor_proxies",
+            "    option forwardfor",
+            "    option http-server-close",
             "",
             "listen stats",
             f"    bind :{stats_port}",
@@ -41,13 +51,15 @@ class HAProxyConfigBuilder:
             "    stats realm HAProxy\\ Statistics",
             "    stats admin if TRUE",
             "",
-            "backend tor_proxies"
+            "backend tor_proxies",
+            "    option httpchk GET /",
+            "    http-check expect status 200,301,302,403,404"
         ]
 
         for i, server in enumerate(proxy_servers):
             http_port = server['http_port']
             config_lines.append(
-                f"    server tor_{i+1} 127.0.0.1:{http_port} check inter 5s fall 3 rise 2")
+                f"    server tor_{i+1} 127.0.0.1:{http_port} check inter 30s fall 5 rise 2 slowstart 60s maxconn 100")
 
         return '\n'.join(config_lines) + '\n'
 
