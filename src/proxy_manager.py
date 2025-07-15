@@ -115,8 +115,6 @@ class ProxyService:
                 'polipo', '-c', self.polipo_config
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
 
-            time.sleep(3)
-
             if self.polipo_process.poll() is not None:
                 stdout, stderr = self.polipo_process.communicate()
                 logger.error(
@@ -329,47 +327,7 @@ class ProxyManager:
             proxy_servers)
         logger.info(f"Generated HAProxy config at {haproxy_config_file}")
 
-    def start_all_services(self):
-        logger.info("Starting all proxy services...")
-        failed_services = []
-
-        for i, service in enumerate(self.proxy_services):
-            logger.info(
-                f"Starting proxy service {i+1}/{len(self.proxy_services)}")
-            service.start()
-
-            if not service.is_healthy():
-                logger.warning(f"Proxy service {i+1} failed to start properly")
-                failed_services.append(i)
-
-                # Add small delay before next attempt to avoid resource conflicts
-                time.sleep(2)
-
-        # Retry failed services with different strategy
-        if failed_services:
-            logger.info(f"Retrying {len(failed_services)} failed services...")
-            for i in failed_services:
-                service = self.proxy_services[i]
-                logger.info(f"Retrying proxy service {i+1}...")
-
-                # Stop and cleanup first
-                service.stop()
-                time.sleep(3)
-
-                # Try starting again
-                service.start()
-
-                if service.is_healthy():
-                    logger.info(f"Successfully restarted proxy service {i+1}")
-                    failed_services.remove(i)
-                else:
-                    logger.error(f"Proxy service {i+1} failed again on retry")
-
-        healthy_count = sum(
-            1 for service in self.proxy_services if service.is_healthy())
-        logger.info(
-            f"Started {healthy_count}/{len(self.proxy_services)} proxy services successfully")
-
+    def start_haproxy(self):
         logger.info("Starting HAProxy load balancer...")
         try:
             from utils import setup_haproxy_logging
@@ -403,18 +361,60 @@ class ProxyManager:
                 if haproxy_logs:
                     logger.error(f"Recent HAProxy logs:\n{haproxy_logs}")
 
-                return
+                return False
 
-            self.running = True
             logger.info("HAProxy started successfully")
             logger.info(
                 "HAProxy logs available at /var/log/haproxy.log or via 'journalctl -u haproxy'")
+            return True
 
         except Exception as e:
             logger.error(f"Failed to start HAProxy: {e}")
             import traceback
             logger.error(
                 f"HAProxy startup traceback: {traceback.format_exc()}")
+            return False
+
+    def start_all_services(self):
+        self.start_haproxy()
+
+        logger.info("Starting all proxy services...")
+        failed_services = []
+
+        for i, service in enumerate(self.proxy_services):
+            logger.info(
+                f"Starting proxy service {i+1}/{len(self.proxy_services)}")
+            service.start()
+
+            if not service.is_healthy():
+                logger.warning(f"Proxy service {i+1} failed to start properly")
+                failed_services.append(i)
+
+                time.sleep(2)
+
+        if failed_services:
+            logger.info(f"Retrying {len(failed_services)} failed services...")
+            for i in failed_services:
+                service = self.proxy_services[i]
+                logger.info(f"Retrying proxy service {i+1}...")
+
+                service.stop()
+                time.sleep(3)
+
+                service.start()
+
+                if service.is_healthy():
+                    logger.info(f"Successfully restarted proxy service {i+1}")
+                    failed_services.remove(i)
+                else:
+                    logger.error(f"Proxy service {i+1} failed again on retry")
+
+        healthy_count = sum(
+            1 for service in self.proxy_services if service.is_healthy())
+        logger.info(
+            f"Started {healthy_count}/{len(self.proxy_services)} proxy services successfully")
+
+        self.running = True
 
     def stop_all_services(self):
         logger.info("Stopping all services...")
@@ -424,9 +424,11 @@ class ProxyManager:
             try:
                 self.haproxy_process.terminate()
                 self.haproxy_process.wait(timeout=5)
+                logger.info("HAProxy stopped")
             except:
                 if self.haproxy_process.poll() is None:
                     self.haproxy_process.kill()
+                    logger.info("HAProxy killed")
 
         for service in self.proxy_services:
             service.stop()
@@ -506,7 +508,7 @@ class ProxyManager:
                 except:
                     pass
 
-                from utils import check_haproxy_logs, get_process_info
+                from utils import check_haproxy_logs
                 haproxy_logs = check_haproxy_logs()
                 if haproxy_logs:
                     logger.error(
@@ -530,35 +532,6 @@ class ProxyManager:
                     restarted_count += 1
                 else:
                     logger.warning(f"Failed to restart proxy service {i+1}")
-
-        if self.haproxy_process and self.haproxy_process.poll() is not None:
-            logger.info("Restarting HAProxy...")
-            try:
-                old_haproxy = self.haproxy_process
-                try:
-                    stdout, stderr = old_haproxy.communicate(timeout=1)
-                    if stderr:
-                        logger.error(
-                            f"HAProxy stderr before restart: {stderr[:1000]}")
-                except:
-                    pass
-
-                self.haproxy_process = subprocess.Popen([
-                    'haproxy', '-f', self.haproxy_config_builder.config_file
-                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-
-                time.sleep(2)
-                if self.haproxy_process.poll() is None:
-                    logger.info("HAProxy restarted successfully")
-                    restarted_count += 1
-                else:
-                    stdout, stderr = self.haproxy_process.communicate()
-                    logger.error(f"HAProxy restart failed")
-                    logger.error(
-                        f"HAProxy restart stderr: {stderr[:1000] if stderr else 'No stderr'}")
-
-            except Exception as e:
-                logger.error(f"Failed to restart HAProxy: {e}")
 
         logger.info(
             f"Restart operation completed. {restarted_count} services restarted.")
