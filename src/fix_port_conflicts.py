@@ -15,7 +15,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def check_and_fix_port_conflicts(num_proxies=5, base_tor_port=9050, base_http_port=8001, force_kill=False):
+def check_and_fix_port_conflicts(num_proxies=5, base_tor_port=10000, base_http_port=20000, force_kill=False):
     """Check for port conflicts and optionally fix them."""
     
     conflicted_ports = []

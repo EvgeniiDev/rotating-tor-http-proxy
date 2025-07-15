@@ -223,7 +223,7 @@ class ProxyService:
 
 
 class ProxyManager:
-    def __init__(self, num_proxies: int = 10, base_tor_port: int = 9050, base_http_port: int = 8001):
+    def __init__(self, num_proxies: int = 10, base_tor_port: int = 10000, base_http_port: int = 20000):
         self.num_proxies = num_proxies
         self.base_tor_port = base_tor_port
         self.base_http_port = base_http_port

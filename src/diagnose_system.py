@@ -54,8 +54,8 @@ def check_port_availability():
     """Check availability of all required ports."""
     logger.info("=== PORT AVAILABILITY CHECK ===")
     
-    base_tor_port = 9050
-    base_http_port = 8001
+    base_tor_port = 10000
+    base_http_port = 20000
     num_proxies = 5
     
     conflicts = []
@@ -139,7 +139,7 @@ def test_tor_startup():
     # Create a minimal Tor config
     with tempfile.NamedTemporaryFile(mode='w', suffix='.conf', delete=False) as f:
         config_content = """
-SocksPort 127.0.0.1:19050
+SocksPort 127.0.0.1:29050
 DataDirectory /tmp/tor_test_data
 ClientOnly 1
 UseMicrodescriptors 1
@@ -164,7 +164,7 @@ AvoidDiskWrites 1
             logger.info("✓ Tor started successfully")
             
             # Check if port is bound
-            if not is_port_available('127.0.0.1', 19050):
+            if not is_port_available('127.0.0.1', 29050):
                 logger.info("✓ Tor is listening on test port")
                 result = True
             else:
@@ -242,7 +242,7 @@ def fix_common_issues():
     
     # Fix port conflicts
     logger.info("Checking and fixing port conflicts...")
-    ports_to_check = list(range(9050, 9055)) + list(range(8001, 8006)) + [8080, 8404]
+    ports_to_check = list(range(10000, 10005)) + list(range(20000, 20005)) + [8080, 8404]
     
     for port in ports_to_check:
         if not is_port_available('127.0.0.1', port):
