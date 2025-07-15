@@ -8,7 +8,7 @@ class HAProxyConfigBuilder:
         os.makedirs(self.config_dir, exist_ok=True)
         self.config_file = os.path.join(self.config_dir, "haproxy.cfg")
 
-    def build_config(self, proxy_servers: List[Dict[str, int]], listen_port: int = 8080, stats_port: int = 8404) -> str:
+    def build_config(self, proxy_servers: List[Dict[str, int]], listen_port: int = 8080, stats_port: int = 4444) -> str:
         config_lines = [
             "global",
             "    maxconn 4096",
@@ -19,14 +19,20 @@ class HAProxyConfigBuilder:
             "    timeout client 50000ms",
             "    timeout server 50000ms",
             "    option httplog",
+            "    option dontlognull",
+            "    option log-health-checks",
+            "    option redispatch",
+            "    option log-separate-errors",
+            "    option abortonclose",
             "    balance roundrobin",
+            "    log global",
             "",
-            f"frontend http_frontend",
+            "frontend http_frontend",
             f"    bind 0.0.0.0:{listen_port}",
             "    default_backend tor_proxies",
             "",
-            f"listen stats",
-            f"    bind 0.0.0.0:{stats_port}",
+            "listen stats",
+            f"    bind :{stats_port}",
             "    stats enable",
             "    mode http",
             "    stats uri /stats",
@@ -41,11 +47,11 @@ class HAProxyConfigBuilder:
         for i, server in enumerate(proxy_servers):
             http_port = server['http_port']
             config_lines.append(
-                f"    server tor_{i+1} 127.0.0.1:{http_port} check")
+                f"    server tor_{i+1} 127.0.0.1:{http_port} check inter 5s fall 3 rise 2")
 
         return '\n'.join(config_lines) + '\n'
 
-    def write_config_file(self, proxy_servers: List[Dict[str, int]], listen_port: int = 8080, stats_port: int = 8404) -> str:
+    def write_config_file(self, proxy_servers: List[Dict[str, int]], listen_port: int = 8080, stats_port: int = 4444) -> str:
         config_content = self.build_config(
             proxy_servers, listen_port, stats_port)
 
@@ -54,7 +60,7 @@ class HAProxyConfigBuilder:
 
         return self.config_file
 
-    def add_server(self, proxy_servers: List[Dict[str, int]], listen_port: int = 8080, stats_port: int = 8404):
+    def add_server(self, proxy_servers: List[Dict[str, int]], listen_port: int = 8080, stats_port: int = 4444):
         self.write_config_file(proxy_servers, listen_port, stats_port)
 
     def cleanup_config_file(self):
