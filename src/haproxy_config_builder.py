@@ -11,7 +11,7 @@ class HAProxyConfigBuilder:
     def build_config(self, proxy_servers: List[Dict[str, int]], listen_port: int = 8080, stats_port: int = 4444) -> str:
         config_lines = [
             "global",
-            "    maxconn 4096",
+            "    maxconn 30000",
             "",
             "defaults",
             "    mode http",
