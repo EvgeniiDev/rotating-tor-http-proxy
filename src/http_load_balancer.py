@@ -5,10 +5,11 @@ from proxy_load_balancer import ProxyBalancer, StatsReporter
 
 logger = logging.getLogger(__name__)
 
+
 class HTTPLoadBalancer:
     """
     Отвечает за HTTP прокси сервер с распределением нагрузки между Tor процессами.
-    
+
     Логика:
     - Принимает HTTP запросы и перенаправляет их через доступные Tor прокси
     - Управляет списком активных прокси (добавление/удаление)
@@ -19,7 +20,7 @@ class HTTPLoadBalancer:
         'listen_port', 'proxy_balancer', 'proxy_monitor', '_lock',
         'config', 'proxy_ports'
     )
-    
+
     def __init__(self, listen_port: int = 8080):
         self.listen_port = listen_port
         self.proxy_balancer: ProxyBalancer = None
@@ -32,9 +33,10 @@ class HTTPLoadBalancer:
             },
             "proxies": [],
             "load_balancing_algorithm": "round_robin",
-            "health_check_interval": 15,
+            "health_check_interval": 25,
             "connection_timeout": 60,
-            "max_retries": 3
+            "max_retries": 3,
+            "proxy_rest_duration": 30
         }
         self.proxy_ports: List[int] = []
 
@@ -55,7 +57,8 @@ class HTTPLoadBalancer:
             if port not in self.proxy_ports:
                 return
             self.proxy_ports.remove(port)
-            self.config["proxies"] = [p for p in self.config["proxies"] if p["port"] != port]
+            self.config["proxies"] = [
+                p for p in self.config["proxies"] if p["port"] != port]
             if self.proxy_balancer:
                 config_copy = self.config.copy()
                 self.proxy_balancer.update_proxies(config_copy)
