@@ -28,15 +28,11 @@ class TorConfigBuilder:
         config_lines = [
             f"SocksPort 127.0.0.1:{socks_port}",
             f"DataDirectory {data_path}",
-            "MaxCircuitDirtiness 10",
+            "MaxCircuitDirtiness 11",
             "NewCircuitPeriod 10",
             "ExitRelay 0",
-            "RefuseUnknownExits 0",
-            "ClientOnly 1",
+            "UseEntryGuards 0",
             "UseMicrodescriptors 1",
-            "AvoidDiskWrites 1",
-            "FetchHidServDescriptors 0",
-            "LearnCircuitBuildTimeout 0",
             # "CircuitBuildTimeout 10",
             f"ExitNodes {exit_nodes_str}",
             "StrictNodes 1",
@@ -45,21 +41,4 @@ class TorConfigBuilder:
         return '\n'.join(config_lines)
 
     def build_config_without_exit_nodes(self, socks_port: int) -> str:
-        # Создаём директорию для данных
-        data_path = f"{self.data_dir}/data_{socks_port}"
-        os.makedirs(data_path, exist_ok=True)
-
-        config_lines = [
-            f"SocksPort 127.0.0.1:{socks_port}",
-            f"DataDirectory {data_path}",
-            "MaxCircuitDirtiness 10",
-            "NewCircuitPeriod 10",
-            "ExitRelay 0",
-            "ClientOnly 1",
-            "UseMicrodescriptors 1",
-            "AvoidDiskWrites 1",
-            "FetchHidServDescriptors 0",
-            "LearnCircuitBuildTimeout 0",
-            "CircuitBuildTimeout 10",
-        ]
-        return '\n'.join(config_lines)
+        return self.build_config(socks_port, exit_nodes=["127.0.0.1"])
