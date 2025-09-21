@@ -78,7 +78,10 @@ def main():
         print("\n🛑 Keyboard interrupt received...")
         shutdown_requested = True
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Unexpected error occurred: {e}")
+        print(f"❌ Error type: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
         shutdown_requested = True
     finally:
         print("🧹 Cleaning up resources...")

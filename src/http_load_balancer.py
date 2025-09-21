@@ -69,12 +69,39 @@ class HTTPLoadBalancer:
             return
         with self._lock:
             config_copy = self.config.copy()
-        self.proxy_balancer = ProxyBalancer(config_copy)
-        logger.info(f"HTTP Load Balancer created with config: {config_copy}")
-        self.proxy_balancer.start()
-        logger.info(f"HTTP Load Balancer started on port {self.listen_port}")
-        self.proxy_monitor = StatsReporter(self.proxy_balancer)
-        self.proxy_monitor.start_monitoring()
+        
+        logger.info(f"Creating HTTP Load Balancer with config: {config_copy}")
+        
+        try:
+            self.proxy_balancer = ProxyBalancer(config_copy)
+            logger.info("✅ ProxyBalancer created successfully")
+            
+            self.proxy_balancer.start()
+            logger.info(f"✅ HTTP Load Balancer started on port {self.listen_port}")
+            
+            self.proxy_monitor = StatsReporter(self.proxy_balancer)
+            self.proxy_monitor.start_monitoring()
+            logger.info("✅ Stats monitoring started")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to start HTTP Load Balancer: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Cleanup on failure
+            if self.proxy_monitor:
+                try:
+                    self.proxy_monitor.stop_monitoring()
+                except:
+                    pass
+                self.proxy_monitor = None
+            if self.proxy_balancer:
+                try:
+                    self.proxy_balancer.stop()
+                except:
+                    pass
+                self.proxy_balancer = None
+            raise
 
     def stop(self):
         logger.info("Stopping HTTP Load Balancer...")

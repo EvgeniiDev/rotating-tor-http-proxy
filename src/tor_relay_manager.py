@@ -49,12 +49,12 @@ class TorRelayManager:
             if not (isinstance(exit_prob, (int, float)) and exit_prob > 0):
                 continue
 
-            exit_policy = relay.get('exit_policy_summary', {})
-            if not self._check_exit_policy_for_web_traffic(exit_policy):
-                continue
+            # exit_policy = relay.get('exit_policy_summary', {})
+            # if not self._check_exit_policy_for_web_traffic(exit_policy):
+            #     continue
 
-            if not self._check_node_stability(relay):
-                continue
+            # if not self._check_node_stability(relay):
+            #     continue
 
             for addr in relay.get('or_addresses', []):
                 ip = addr.split(':')[0]
@@ -68,7 +68,7 @@ class TorRelayManager:
                         'flags': flags,
                         'uptime': relay.get('uptime', 0),
                         'last_seen': relay.get('last_seen', ''),
-                        'exit_policy_summary': exit_policy
+                        # 'exit_policy_summary': exit_policy
                     })
                     break
 

@@ -5,7 +5,7 @@ set -e
 PROJECT_DIR="$HOME/tor-http-proxy"
 SERVICE_NAME="tor-http-proxy"
 USER="$USER"
-TOR_PROCESSES=850
+TOR_PROCESSES=200
 
 if [[ $EUID -ne 0 ]]; then
    echo "This script must be run as root (use sudo)" 
@@ -13,7 +13,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 echo "Installing dependencies..."
-apt install -y python3 python3-pip python3-venv tor git
+apt install -y python3 python3-pip python3-venv tor git openssl
 
 echo "Creating project directory..."
 mkdir -p "$PROJECT_DIR"
@@ -31,6 +31,17 @@ echo "Setting up Tor directories..."
 mkdir -p "$PROJECT_DIR/data"
 chmod 755 "$PROJECT_DIR/data"
 
+echo "Creating SSL certificates..."
+if [ ! -f "$PROJECT_DIR/cert.pem" ] || [ ! -f "$PROJECT_DIR/key.pem" ]; then
+    openssl req -x509 -newkey rsa:4096 -keyout "$PROJECT_DIR/key.pem" -out "$PROJECT_DIR/cert.pem" -days 365 -nodes -subj "/C=US/ST=State/L=City/O=TorProxy/CN=localhost"
+    chmod 600 "$PROJECT_DIR/key.pem"
+    chmod 644 "$PROJECT_DIR/cert.pem"
+    chown $USER:$USER "$PROJECT_DIR/cert.pem" "$PROJECT_DIR/key.pem"
+    echo "SSL certificates created successfully"
+else
+    echo "SSL certificates already exist"
+fi
+
 echo "Creating systemd service..."
 cat > /etc/systemd/system/$SERVICE_NAME.service << EOF
 [Unit]
@@ -45,10 +56,10 @@ Environment=PYTHONPATH=$PROJECT_DIR
 Environment=TOR_PROCESSES=$TOR_PROCESSES
 ExecStart=$PROJECT_DIR/venv/bin/python $PROJECT_DIR/main.py
 MemoryAccounting=yes
-MemoryHigh=23.5G
-MemoryMax=24G
+MemoryHigh=7.5G
+MemoryMax=7.8G
 CPUAccounting=yes
-CPUQuota=400%
+CPUQuota=200%
 
 [Install]
 WantedBy=multi-user.target

@@ -101,3 +101,13 @@ build/
 *.pyc
 *.pyo
 *.pyd
+.vscode/
+
+# SSL certificates
+*.pem
+cert.pem
+key.pem
+
+# Temporary files
+*.tmp
+*.log
