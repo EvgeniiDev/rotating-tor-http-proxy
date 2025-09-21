@@ -26,7 +26,7 @@ class TorConfigBuilder:
         os.makedirs(data_path, exist_ok=True)
 
         config_lines = [
-            f"SocksPort 127.0.0.1:{socks_port}",
+            f"SocksPort 0.0.0.0:{socks_port}",
             f"DataDirectory {data_path}",
             "MaxCircuitDirtiness 11",
             "NewCircuitPeriod 10",
