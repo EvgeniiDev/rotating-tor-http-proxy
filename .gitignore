@@ -105,8 +105,8 @@ build/
 
 # SSL certificates
 *.pem
-cert.pem
-key.pem
+*.key
+*.crt
 
 # Temporary files
 *.tmp
