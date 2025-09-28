@@ -83,35 +83,49 @@ class TestIntegration(unittest.TestCase):
             self.fail(f"Failed to make request through proxy: {e}")
 
     def test_module_api_compatibility_in_runtime(self):
-        from exit_node_tester import ExitNodeChecker
-        from tor_pool_manager import TorBalancerManager
+        from tor_haproxy_integrator import TorBalancerManager
         from config_manager import TorConfigBuilder
-        from unittest.mock import Mock
-        
-        config_builder = TorConfigBuilder()
-        checker = ExitNodeChecker(config_builder=config_builder)
-        
-        required_methods = ['test_exit_nodes_parallel', 'test_node', 'test_nodes']
-        for method in required_methods:
-            self.assertTrue(hasattr(checker, method),
-                           f"ExitNodeChecker missing method: {method}")
-        
-        deprecated_methods = ['test_nodes_with_temp_instances']
-        for method in deprecated_methods:
-            self.assertFalse(hasattr(checker, method),
-                           f"ExitNodeChecker should not have deprecated method: {method}")
-        
-        mock_balancer = Mock()
+        from unittest.mock import Mock, patch
+
         mock_runner = Mock()
+        mock_runner.start_many.return_value = [9100]
+        mock_runner.get_statuses.return_value = {9100: {'is_running': True}}
+
+        mock_balancer = Mock()
+        mock_balancer.check_dependencies.return_value = (True, [])
+        mock_balancer.start_balancer.return_value = True
+        mock_balancer.get_stats.return_value = {
+            'haproxy_running': True,
+            'tor_processes_running': 1,
+            'tor_ports': [9100],
+            'config_dir': '/tmp/haproxy'
+        }
+
+        relay_manager = Mock()
+        relay_manager.fetch_tor_relays.return_value = {
+            'relays': [{'flags': ['Exit'], 'exit_probability': 1.0, 'or_addresses': ['1.1.1.1:9001'], 'observed_bandwidth': 100}]
+        }
+        relay_manager.extract_relay_ips.return_value = [{'ip': '1.1.1.1'}]
+
         pool_manager = TorBalancerManager(
-            config_builder=config_builder,
-            checker=checker,
+            config_builder=TorConfigBuilder(),
+            checker=None,
             runner=mock_runner,
-            http_balancer=mock_balancer
+            http_balancer=mock_balancer,
+            relay_manager=relay_manager
         )
-        
-        self.assertTrue(hasattr(pool_manager.checker, 'test_exit_nodes_parallel'),
-                       "TorBalancerManager checker should have test_exit_nodes_parallel method")
+
+        with patch.object(pool_manager, "_find_free_ports", return_value=[9100]):
+            started = pool_manager.start_pool(1, exit_nodes=[])
+
+        self.assertTrue(started)
+        relay_manager.fetch_tor_relays.assert_called_once()
+        relay_manager.extract_relay_ips.assert_called_once()
+        mock_runner.start_many.assert_called_once_with([9100], [['1.1.1.1']])
+
+        stats = pool_manager.get_stats()
+        self.assertEqual(stats['haproxy_running'], True)
+        pool_manager.stop_pool()
 
 
 if __name__ == '__main__':

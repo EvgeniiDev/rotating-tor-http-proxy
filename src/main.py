@@ -1,115 +1,142 @@
 #!/usr/bin/env python3
+"""
+Основной скрипт запуска HAProxy Tor Pool Manager
+Полная Python реализация без shell скриптов
+"""
+
 import os
-import logging
-import time
-import signal
 import sys
+import signal
+import logging
+import argparse
+import time
 
-from http_load_balancer import HTTPLoadBalancer
-from tor_pool_manager import TorBalancerManager
-from config_manager import TorConfigBuilder
-from tor_parallel_runner import TorParallelRunner
-from exit_node_tester import ExitNodeChecker
-from tor_relay_manager import TorRelayManager
-from utils import thread_manager, cleanup_temp_files
+# Добавляем текущую директорию в Python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+from tor_haproxy_integrator import TorHAProxyIntegrator
 
-shutdown_requested = False
+
+# Настройка логирования
+def setup_logging(log_level: str = 'INFO'):
+    """Настраивает логирование"""
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper()),
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+
+
+# Глобальная переменная для менеджера
+pool_manager: TorHAProxyIntegrator | None = None
+
 
 def signal_handler(signum, frame):
-    global shutdown_requested
-    print(f"\n🛑 Received signal {signum}, shutting down...")
-    shutdown_requested = True
+    """Обработчик сигналов для graceful shutdown"""
+    global pool_manager
+
+    signal_names = {
+        signal.SIGTERM: 'SIGTERM',
+        signal.SIGINT: 'SIGINT',
+        signal.SIGQUIT: 'SIGQUIT'
+    }
+
+    signal_name = signal_names.get(signum, f'SIG{signum}')
+    logging.info(f"📨 Получен сигнал {signal_name}, начинаю graceful shutdown...")
+
+    if pool_manager:
+        try:
+            pool_manager.stop_pool()
+            logging.info("✅ HAProxy Tor пул остановлен успешно")
+        except Exception as exc:  # noqa: BLE001
+            logging.error("❌ Ошибка при остановке пула: %s", exc)
+
+    sys.exit(0)
+
 
 def main():
-    global shutdown_requested
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
-    tor_count = int(os.environ.get('TOR_PROCESSES', '50'))
-    proxy_port = int(os.environ.get('PROXY_PORT', '8080'))
-    
-    config_builder = TorConfigBuilder()
-    checker = ExitNodeChecker(config_builder, 20, test_requests_count=6, required_success_count=3, timeout=30)
-    runner = TorParallelRunner(config_builder, max_workers=20)
-    balancer = HTTPLoadBalancer(listen_port=proxy_port)
-    manager = TorBalancerManager(config_builder, checker, runner, balancer)
-    
-    print("⚠️ TEMPORARY MODE: Exit node filtering is DISABLED - using all nodes without testing")
-    
-    try:
-        exit_nodes = []
-        exit_nodes_env = os.environ.get('EXIT_NODES', '')
-        if exit_nodes_env:
-            exit_nodes = exit_nodes_env.split(',')
-            print(f"Using {len(exit_nodes)} exit nodes from environment")
-        else:
-            print("Fetching exit nodes from Tor relay manager...")
-            relay_manager = TorRelayManager()
-            relay_data = relay_manager.fetch_tor_relays()
-            if relay_data:
-                all_exit_nodes = relay_manager.extract_relay_ips(relay_data)
-                max_nodes = tor_count * 7
-                limited_nodes = all_exit_nodes[:max_nodes]
-                exit_nodes = [node['ip'] for node in limited_nodes]
-                print(f"Found {len(all_exit_nodes)} total exit nodes, using {len(exit_nodes)} (limit: {max_nodes})")
+    """Основная функция"""
+    global pool_manager
+
+    parser = argparse.ArgumentParser(description='HAProxy Tor Pool Manager')
+    parser.add_argument('--tor-count', type=int, default=5,
+                        help='Количество Tor процессов (по умолчанию: 5)')
+    args = parser.parse_args()
+
+    setup_logging('INFO')
+
+    tor_count = args.tor_count
+    tor_env = os.getenv('TOR_PROCESSES')
+    if tor_env is not None:
+        try:
+            env_value = int(tor_env)
+            if env_value > 0:
+                tor_count = env_value
+                logging.info(
+                    "TOR_PROCESSES=%s переопределяет параметр --tor-count", env_value
+                )
             else:
-                print("⚠️ Failed to fetch exit nodes, continuing with empty list")
-        
-        print(f"Using {len(exit_nodes)} exit nodes for {tor_count} Tor processes")
-        
-        print(f"Starting Tor pool with {tor_count} processes...")
-        success = manager.run_pool(count=tor_count, exit_nodes=exit_nodes)
-        
-        if success:
-            print(f"🌐 HTTP proxy is running on http://localhost:{proxy_port}")
-            while not shutdown_requested:
-                time.sleep(1)
-            
-        else:
-            print("❌ Failed to start pool")
-            
-    except KeyboardInterrupt:
-        print("\n🛑 Keyboard interrupt received...")
-        shutdown_requested = True
-    except Exception as e:
-        print(f"❌ Unexpected error occurred: {e}")
-        print(f"❌ Error type: {type(e).__name__}")
+                logging.warning("TOR_PROCESSES должно быть положительным, игнорируем %s", tor_env)
+        except ValueError:
+            logging.warning(
+                "TOR_PROCESSES=%s не является числом, используем значение %s", tor_env, tor_count
+            )
+
+    logging.info("🚀 HAProxy Tor Pool Manager - запуск")
+    logging.info("📊 Параметры: tor_processes=%s", tor_count)
+
+    # Настраиваем обработчики сигналов
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGQUIT, signal_handler)
+
+    try:
+        pool_manager = TorHAProxyIntegrator(max_workers=tor_count)
+
+        if not pool_manager.start_pool(tor_count):
+            logging.error("❌ Не удалось запустить пул")
+            sys.exit(1)
+
+        stats = pool_manager.get_stats()
+        logging.info("=" * 60)
+        logging.info("🎉 HAProxy Tor Pool Manager успешно запущен!")
+        logging.info("🌐 Frontend SOCKS5 proxy: 127.0.0.1:%s", stats['frontend_port'])
+        logging.info("📊 Статистика HAProxy: http://127.0.0.1:%s/stats", stats['stats_port'])
+        logging.info("🔄 Активных Tor процессов: %s", stats['tor_processes_running'])
+        logging.info("🚪 Используемые порты: %s", stats['tor_ports'])
+        logging.info("📁 Конфигурационная директория: %s", stats['config_dir'])
+        logging.info("=" * 60)
+
+        try:
+            while pool_manager.is_running():
+                time.sleep(60)
+                current_stats = pool_manager.get_stats()
+                logging.debug(
+                    "📊 Статус: HAProxy=%s, Tor=%s/%s",
+                    current_stats['haproxy_running'],
+                    current_stats['tor_processes_running'],
+                    current_stats['tor_processes_total'],
+                )
+        except KeyboardInterrupt:
+            logging.info("📨 Получен Ctrl+C, завершение работы...")
+
+    except Exception as exc:  # noqa: BLE001
+        logging.error("❌ Критическая ошибка: %s", exc)
         import traceback
-        traceback.print_exc()
-        shutdown_requested = True
+        logging.error(traceback.format_exc())
+        sys.exit(1)
+
     finally:
-        print("🧹 Cleaning up resources...")
-        cleanup_start = time.time()
-        
-        try:
-            if 'checker' in locals():
-                checker.cleanup()
-        except Exception as e:
-            print(f"Warning: Error during checker cleanup: {e}")
-        
-        try:
-            if 'manager' in locals():
-                manager.stop()
-        except Exception as e:
-            print(f"Warning: Error during manager stop: {e}")
-        
-        try:
-            thread_manager.shutdown_all(timeout=30)
-        except Exception as e:
-            print(f"Warning: Error during thread manager shutdown: {e}")
-        
-        cleanup_temp_files()
-        
-        cleanup_time = time.time() - cleanup_start
-        print(f"✅ Pool stopped (cleanup took {cleanup_time:.1f}s)")
-        
-        sys.exit(0)
+        if pool_manager:
+            try:
+                pool_manager.stop_pool()
+            except Exception as exc:  # noqa: BLE001
+                logging.error("❌ Ошибка при финальной остановке: %s", exc)
+
+        logging.info("✅ HAProxy Tor Pool Manager завершён")
+
 
 if __name__ == "__main__":
     main()

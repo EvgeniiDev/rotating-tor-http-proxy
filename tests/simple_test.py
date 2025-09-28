@@ -1,80 +1,50 @@
 #!/usr/bin/env python3
 """
-Упрощенный тест новой архитектуры - запускает один Tor процесс и HTTP балансировщик
+Упрощенный тест новой HAProxy архитектуры
 """
 import logging
 import time
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
-from config_manager import TorConfigBuilder
-from tor_process import TorInstance
-from http_load_balancer import HTTPLoadBalancer
+from haproxy_tor_pool_manager import HAProxyTorPoolManager
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-def test_simple_architecture():
-    print("🚀 Testing new architecture with simplified setup...")
+def test_haproxy_architecture():
+    print("🚀 Testing HAProxy architecture...")
     
-    # 1. Создаём конфиг для Tor
-    config_builder = TorConfigBuilder()
-    print("✅ Config builder created")
-    
-    # 2. Создаём HTTP балансировщик
-    balancer = HTTPLoadBalancer(listen_port=8080)
-    print("✅ HTTP Load Balancer created")
-    
-    # 3. Создаём один Tor процесс (без exit nodes для простоты)
-    tor_instance = TorInstance(port=9050, exit_nodes=[], config_builder=config_builder)
-    print("✅ Tor instance created")
+    pool_manager = HAProxyTorPoolManager(frontend_port=8090, stats_port=8404)
+    print("✅ HAProxy Tor Pool Manager created")
     
     try:
-        # 4. Создаём конфиг и запускаем Tor
-        print("📝 Creating Tor config...")
-        tor_instance.create_config()
+        print("⏳ Starting pool with 2 processes...")
+        success = pool_manager.start_pool(tor_count=2, exit_nodes=[])
         
-        print("🔄 Starting Tor process...")
-        tor_instance.start()
+        if not success:
+            print("❌ Failed to start pool")
+            return False
+            
+        print("✅ Pool started successfully")
+        time.sleep(20)  # Wait for initialization
         
-        # 5. Ждём запуска Tor
-        print("⏳ Waiting for Tor to start...")
-        time.sleep(10)
+        stats = pool_manager.get_stats()
+        print(f"📊 Running processes: {stats['tor_processes_running']}")
         
-        # 6. Проверяем здоровье
-        print("🏥 Checking Tor health...")
-        if tor_instance.check_health():
-            print("✅ Tor is healthy!")
-            print(f"📊 Port: {tor_instance.port}, Running: {tor_instance.is_running}")
+        if stats['tor_processes_running'] > 0:
+            print(f"🌐 SOCKS5 proxy: 127.0.0.1:{stats['frontend_port']}")
+            print("🎉 Test completed successfully!")
+            return True
         else:
-            print("❌ Tor health check failed")
+            print("❌ No processes running")
             return False
         
-        # 7. Добавляем в балансировщик и запускаем
-        print("⚖️ Adding to load balancer...")
-        balancer.add_proxy(9050)
-        balancer.start()
-        print("✅ HTTP Load Balancer started on port 8080")
-        
-        print("\n🎉 SUCCESS! Architecture working!")
-        print("🌐 Test with: curl -x http://localhost:8080 https://httpbin.org/ip")
-        print("⏱️ Running for 30 seconds...")
-        
-        time.sleep(30)
-        return True
-        
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Test failed: {e}")
         return False
-        
     finally:
-        print("🛑 Cleaning up...")
-        tor_instance.stop()
-        balancer.stop()
-        print("✅ Cleanup complete")
+        pool_manager.stop_pool()
 
 if __name__ == "__main__":
-    success = test_simple_architecture()
-    if success:
-        print("🎊 Test PASSED!")
-    else:
-        print("💥 Test FAILED!")
+    success = test_haproxy_architecture()
+    sys.exit(0 if success else 1)

@@ -20,6 +20,7 @@ class ProxyTester:
         self.request_timestamps = []
         self.success_timestamps = []
         self.lock = threading.Lock()
+        self.exception_types = defaultdict(int)
         
         self.target_urls = [
             "https://steamcommunity.com/market/listings/730/AK-47%20|%20Redline%20(Field-Tested)",
@@ -47,6 +48,8 @@ class ProxyTester:
             timeouts = self.response_codes.get('TIMEOUT', 0)
             decode_errors = self.response_codes.get('DECODE_ERROR', 0)
             other_errors = self.response_codes.get('OTHER_ERROR', 0)
+            chunked_errors = self.response_codes.get('CHUNKED_ENCODING_ERROR', 0)
+            exception_snapshot = dict(self.exception_types)
             
             current_rpm = self.calculate_rpm(self.request_timestamps) if len(self.request_timestamps) > 1 else 0
             success_rpm = self.calculate_rpm(self.success_timestamps) if len(self.success_timestamps) > 1 else 0
@@ -76,6 +79,10 @@ class ProxyTester:
         print(f"⏰ Timeouts:            {timeouts:>6} ({timeouts/total_completed*100:>5.1f}%)" if total_completed > 0 else "⏰ Timeouts:                 0 (  0.0%)")
         print(f"📦 Decode Errors:       {decode_errors:>6} ({decode_errors/total_completed*100:>5.1f}%)" if total_completed > 0 else "📦 Decode Errors:            0 (  0.0%)")
         print(f"💥 Other Errors:        {other_errors:>6} ({other_errors/total_completed*100:>5.1f}%)" if total_completed > 0 else "💥 Other Errors:             0 (  0.0%)")
+        print(f"📡 Chunk Errors:       {chunked_errors:>6} ({chunked_errors/total_completed*100:>5.1f}%)" if total_completed > 0 else "📡 Chunk Errors:             0 (  0.0%)")
+        if exception_snapshot:
+            formatted = ', '.join(f"{k}: {v}" for k, v in sorted(exception_snapshot.items()))
+            print(f"🔥 Exception Types:       {formatted}")
         
         print("-" * 90)
         print("🚀 RPM METRICS:")
@@ -94,10 +101,15 @@ class ProxyTester:
                     print(f"  {len(self.results)-5+i:>2}. ⚠️  HTTP {status} - {response_time:.2f}s")
                 elif status is None:
                     error_type = result.get('result_type', 'unknown')
+                    detail = result.get('exception_type') or result.get('error', 'unknown')
                     if error_type == 'decode_error':
                         print(f"  {len(self.results)-5+i:>2}. 📦 DECODE ERROR")
+                    elif error_type == 'chunked_encoding_error':
+                        print(f"  {len(self.results)-5+i:>2}. 📡 CHUNK ERROR {detail}")
+                    elif error_type == 'exception':
+                        print(f"  {len(self.results)-5+i:>2}. ❌ EXCEPTION {detail}")
                     else:
-                        print(f"  {len(self.results)-5+i:>2}. ❌ {error_type.upper()}")
+                        print(f"  {len(self.results)-5+i:>2}. ❌ {error_type.upper()} {detail}")
                 else:
                     print(f"  {len(self.results)-5+i:>2}. ❓ HTTP {status} - {response_time:.2f}s")
         
@@ -191,6 +203,7 @@ class ProxyTester:
             with self.lock:
                 self.response_codes['CONNECTION_ERROR'] += 1
                 self.request_timestamps.append(time.time())
+                self.exception_types[type(e).__name__] += 1
             
             return {
                 'request_id': request_id,
@@ -199,6 +212,7 @@ class ProxyTester:
                 'proxy_port': 'unknown',
                 'result_type': 'connection_error',
                 'error': 'Connection failed',
+                'exception_type': type(e).__name__,
                 'timestamp': int(time.time()),
                 'url': url
             }
@@ -207,6 +221,7 @@ class ProxyTester:
             with self.lock:
                 self.response_codes['PROXY_ERROR'] += 1
                 self.request_timestamps.append(time.time())
+                self.exception_types[type(e).__name__] += 1
             
             return {
                 'request_id': request_id,
@@ -215,6 +230,7 @@ class ProxyTester:
                 'proxy_port': 'unknown',
                 'result_type': 'proxy_error',
                 'error': str(e)[:100],
+                'exception_type': type(e).__name__,
                 'timestamp': int(time.time()),
                 'url': url
             }
@@ -223,6 +239,7 @@ class ProxyTester:
             with self.lock:
                 self.response_codes['TIMEOUT'] += 1
                 self.request_timestamps.append(time.time())
+                self.exception_types[type(e).__name__] += 1
             
             return {
                 'request_id': request_id,
@@ -231,6 +248,24 @@ class ProxyTester:
                 'proxy_port': 'unknown',
                 'result_type': 'timeout',
                 'error': 'Request timeout',
+                'exception_type': type(e).__name__,
+                'timestamp': int(time.time()),
+                'url': url
+            }
+        except requests.exceptions.ChunkedEncodingError as e:
+            with self.lock:
+                self.response_codes['CHUNKED_ENCODING_ERROR'] += 1
+                self.request_timestamps.append(time.time())
+                self.exception_types[type(e).__name__] += 1
+            
+            return {
+                'request_id': request_id,
+                'status_code': None,
+                'response_time': None,
+                'proxy_port': 'unknown',
+                'result_type': 'chunked_encoding_error',
+                'error': 'Chunked transfer terminated',
+                'exception_type': type(e).__name__,
                 'timestamp': int(time.time()),
                 'url': url
             }
@@ -239,6 +274,7 @@ class ProxyTester:
             with self.lock:
                 self.response_codes['DECODE_ERROR'] += 1
                 self.request_timestamps.append(time.time())
+                self.exception_types[type(e).__name__] += 1
             
             return {
                 'request_id': request_id,
@@ -247,6 +283,7 @@ class ProxyTester:
                 'proxy_port': 'unknown',
                 'result_type': 'decode_error',
                 'error': f'Content decode error: {str(e)[:80]}',
+                'exception_type': type(e).__name__,
                 'timestamp': int(time.time()),
                 'url': url
             }
@@ -255,6 +292,7 @@ class ProxyTester:
             with self.lock:
                 self.response_codes['OTHER_ERROR'] += 1
                 self.request_timestamps.append(time.time())
+                self.exception_types[type(e).__name__] += 1
             
             return {
                 'request_id': request_id,
@@ -263,6 +301,7 @@ class ProxyTester:
                 'proxy_port': 'unknown',
                 'result_type': 'exception',
                 'error': str(e)[:100],
+                'exception_type': type(e).__name__,
                 'timestamp': int(time.time()),
                 'url': url
             }
@@ -328,9 +367,11 @@ class ProxyTester:
         
         code_200_count = self.response_codes.get(200, 0)
         code_429_count = self.response_codes.get(429, 0)
+        chunked_errors = self.response_codes.get('CHUNKED_ENCODING_ERROR', 0)
         
         success_percentage = (code_200_count / total_requests * 100) if total_requests > 0 else 0
         rate_limit_percentage = (code_429_count / total_requests * 100) if total_requests > 0 else 0
+        chunked_percentage = (chunked_errors / total_requests * 100) if total_requests > 0 else 0
         
         total_rpm = self.calculate_rpm(self.request_timestamps) if len(self.request_timestamps) > 1 else 0
         success_rpm = self.calculate_rpm(self.success_timestamps) if len(self.success_timestamps) > 1 else 0
@@ -346,11 +387,18 @@ class ProxyTester:
         print("📈 STATUS CODE BREAKDOWN:")
         print(f"✅ HTTP 200 (Success):  {code_200_count:>6} ({success_percentage:>5.1f}%)")
         print(f"⚠️  HTTP 429 (Rate Limit): {code_429_count:>6} ({rate_limit_percentage:>5.1f}%)")
+        print(f"📡 Chunk Errors:        {chunked_errors:>6} ({chunked_percentage:>5.1f}%)")
         
         for code, count in sorted(self.response_codes.items()):
             if isinstance(code, int) and code not in [200, 429]:
                 percentage = (count / total_requests * 100) if total_requests > 0 else 0
                 print(f"📊 HTTP {code}:           {count:>6} ({percentage:>5.1f}%)")
+
+        if self.exception_types:
+            print("-" * 90)
+            print("🔥 EXCEPTION TYPES:")
+            for name, count in sorted(self.exception_types.items()):
+                print(f"  {name}: {count}")
                 
         print("-" * 90)
         print("🚀 PERFORMANCE METRICS:")

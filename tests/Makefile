@@ -124,14 +124,4 @@ install-deps:
 .PHONY: test-critical
 test-critical: test-api test-integrity test-contract
 	@echo "All critical API tests completed successfully"
-
-# Run tests that would catch the original bug (missing method errors)
-.PHONY: test-method-compatibility
-test-method-compatibility:
-	@echo "Running method compatibility validation..."
-	cd $(SRC_DIR) && $(TIMEOUT) env $(PYTHONPATH) $(PYTHON) -c "from tor_pool_manager import TorBalancerManager; from exit_node_tester import ExitNodeChecker; print('✓ Import test passed')"
-	cd $(SRC_DIR) && $(TIMEOUT) env $(PYTHONPATH) $(PYTHON) -m pytest ../tests/test_api_compatibility.py::TestAPICompatibility::test_deprecated_methods_not_used -v
-	cd $(SRC_DIR) && $(TIMEOUT) env $(PYTHONPATH) $(PYTHON) -m pytest ../tests/test_module_integrity.py::TestModuleIntegrity::test_method_call_patterns_in_source -v
-	@echo "✓ Method compatibility tests passed"
-
 .DEFAULT_GOAL := help
