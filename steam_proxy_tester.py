@@ -1,17 +1,28 @@
 #!/usr/bin/env python3
-import requests
-import time
 import argparse
-import sys
-import random
+import contextlib
 import os
+import random
+import socket
+import ssl
+import sys
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from http.client import HTTPResponse, IncompleteRead, RemoteDisconnected
+from urllib.parse import urlparse
+
+import socks
 
 class ProxyTester:
     def __init__(self, proxy_host="127.0.0.1", proxy_port=8080, total_requests=10, delay=5.0, threads=1):
-        self.proxy_url = f"http://{proxy_host}:{proxy_port}"
+        self.proxy_host = proxy_host
+        self.proxy_port = proxy_port
+        self.proxy_username = os.getenv("PROXY_USERNAME")
+        self.proxy_password = os.getenv("PROXY_PASSWORD")
+        self.proxy_url = self._build_proxy_url(include_auth=True)
+        self.proxy_display = self._build_proxy_url(include_auth=False)
         self.total_requests = total_requests
         self.delay = delay
         self.threads = threads
@@ -35,6 +46,16 @@ class ProxyTester:
             "https://steamcommunity.com/market/listings/730/Chroma%203%20Case"
         ]
 
+    def _build_proxy_url(self, include_auth=True):
+        prefix = "http://"
+        auth_segment = ""
+        if include_auth and self.proxy_username:
+            if self.proxy_password:
+                auth_segment = f"{self.proxy_username}:{self.proxy_password}@"
+            else:
+                auth_segment = f"{self.proxy_username}@"
+        return f"{prefix}{auth_segment}{self.proxy_host}:{self.proxy_port}"
+
     def clear_screen(self):
         os.system('clear' if os.name == 'posix' else 'cls')
 
@@ -50,10 +71,9 @@ class ProxyTester:
             other_errors = self.response_codes.get('OTHER_ERROR', 0)
             chunked_errors = self.response_codes.get('CHUNKED_ENCODING_ERROR', 0)
             exception_snapshot = dict(self.exception_types)
-            
             current_rpm = self.calculate_rpm(self.request_timestamps) if len(self.request_timestamps) > 1 else 0
             success_rpm = self.calculate_rpm(self.success_timestamps) if len(self.success_timestamps) > 1 else 0
-        
+            
         success_pct = (current_200 / total_completed * 100) if total_completed > 0 else 0
         rate_limit_pct = (current_429 / total_completed * 100) if total_completed > 0 else 0
         
@@ -89,6 +109,7 @@ class ProxyTester:
         print(f"📊 Total RPM:            {current_rpm:>6.1f} requests/minute")
         print(f"✅ Success RPM (200):    {success_rpm:>6.1f} requests/minute")
         
+        print("-" * 90)
         if len(self.results) > 0:
             print("-" * 90)
             print("📋 LAST 5 REQUESTS:")
@@ -115,190 +136,234 @@ class ProxyTester:
         
         print("=" * 90)
 
-    def calculate_rpm(self, timestamps, duration_minutes=5):
-        if len(timestamps) <= 1:
-            return 0
-        
-        current_time = time.time()
-        cutoff_time = current_time - (duration_minutes * 60)
-        
-        recent_requests = [t for t in timestamps if t >= cutoff_time]
-        
-        if len(recent_requests) <= 1:
-            return 0
-            
-        actual_duration = (timestamps[-1] - timestamps[0]) / 60
-        return len(recent_requests) / actual_duration if actual_duration > 0 else 0
+    def _open_proxy_socket(self, host, port, timeout):
+        sock = socks.socksocket()
+        sock.set_proxy(
+            socks.HTTP,
+            addr=self.proxy_host,
+            port=self.proxy_port,
+            username=self.proxy_username,
+            password=self.proxy_password,
+            rdns=True,
+        )
+        sock.settimeout(timeout)
+        sock.connect((host, port))
+        return sock
+
+    def _perform_http_request(self, url, headers, timeout):
+        parsed = urlparse(url)
+        if not parsed.scheme or not parsed.hostname:
+            raise ValueError(f"Unsupported URL: {url}")
+
+        host = parsed.hostname
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        path = parsed.path or "/"
+        if parsed.params:
+            path += f";{parsed.params}"
+        if parsed.query:
+            path += f"?{parsed.query}"
+
+        request_headers = dict(headers)
+        host_header = host
+        if (parsed.scheme == "http" and port != 80) or (parsed.scheme == "https" and port != 443):
+            host_header = f"{host}:{port}"
+        request_headers["Host"] = host_header
+        request_headers["Connection"] = "close"
+        request_headers.setdefault("Accept-Encoding", "identity")
+
+        request_lines = [f"GET {path} HTTP/1.1"]
+        request_lines.extend(f"{key}: {value}" for key, value in request_headers.items())
+        request_bytes = ("\r\n".join(request_lines) + "\r\n\r\n").encode("utf-8")
+
+        start_time = time.time()
+        sock = None
+        wrapped_sock = None
+        response = None
+        try:
+            sock = self._open_proxy_socket(host, port, timeout)
+            wrapped_sock = sock
+            if parsed.scheme == "https":
+                context = ssl.create_default_context()
+                context.check_hostname = False  # allow testing against proxies with self-signed certs
+                context.verify_mode = ssl.CERT_NONE
+                wrapped_sock = context.wrap_socket(sock, server_hostname=host)
+
+            wrapped_sock.sendall(request_bytes)
+
+            response = HTTPResponse(wrapped_sock)
+            response.begin()
+            body = response.read()
+            status = response.status
+            headers_map = {key: value for key, value in response.getheaders()}
+            elapsed = time.time() - start_time
+
+            # Ensure body is decoded only if it is a byte object
+            if isinstance(body, bytes):
+                body = body.decode('utf-8', errors='replace')
+
+            return status, headers_map, body, elapsed
+        finally:
+            if response is not None:
+                with contextlib.suppress(Exception):
+                    response.close()
+            if wrapped_sock is not None:
+                with contextlib.suppress(Exception):
+                    wrapped_sock.close()
+            if sock is not None and sock is not wrapped_sock:
+                with contextlib.suppress(Exception):
+                    sock.close()
 
     def make_request(self, request_id, url):
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Connection": "keep-alive",
+            "Accept-Encoding": "identity",
+            "Connection": "close",
             "Upgrade-Insecure-Requests": "1",
             "Sec-Fetch-Dest": "document",
             "Sec-Fetch-Mode": "navigate",
             "Sec-Fetch-Site": "none",
             "Cache-Control": "max-age=0"
         }
-        
+
         try:
-            t0 = time.time()
-            
-            session = requests.Session()
-            
-            resp = session.get(
-                url, 
-                headers=headers, 
-                proxies={
-                    "http": self.proxy_url, 
-                    "https": self.proxy_url
-                }, 
-                timeout=30, 
-                verify=False,
-                stream=False,
-                allow_redirects=True
+            status_code, response_headers, body, elapsed = self._perform_http_request(url, headers, timeout=60.0)
+            content_length = len(body)
+            content_encoding = (
+                response_headers.get('Content-Encoding')
+                or response_headers.get('content-encoding')
+                or 'none'
             )
-            
-            t1 = time.time()
-            
-            try:
-                content_length = len(resp.content)
-            except Exception as decode_error:
-                content_length = 0
-            
+
             item = {
                 'request_id': request_id,
-                'status_code': resp.status_code,
-                'response_time': round(t1 - t0, 3),
-                'proxy_port': resp.headers.get('X-Proxy-Port', 'unknown'),
+                'status_code': status_code,
+                'response_time': round(elapsed, 3),
+                'proxy_port': str(self.proxy_port),
                 'timestamp': int(time.time()),
                 'url': url,
                 'content_length': content_length,
-                'content_encoding': resp.headers.get('Content-Encoding', 'none')
+                'content_encoding': content_encoding
             }
-            
-            session.close()
-            
+
             with self.lock:
-                self.response_codes[resp.status_code] += 1
-                
+                self.response_codes[status_code] += 1
                 current_time = time.time()
                 self.request_timestamps.append(current_time)
-                
-                if resp.status_code == 200:
+
+                if status_code == 200:
                     item['result_type'] = 'success'
                     self.success_timestamps.append(current_time)
-                elif resp.status_code == 429:
+                elif status_code == 429:
                     item['result_type'] = 'rate_limited'
                 else:
                     item['result_type'] = 'http_error'
-                    item['error'] = f'HTTP {resp.status_code}'
-                
+                    item['error'] = f'HTTP {status_code}'
+
             return item
-                    
-        except requests.exceptions.ConnectionError as e:
-            with self.lock:
-                self.response_codes['CONNECTION_ERROR'] += 1
-                self.request_timestamps.append(time.time())
-                self.exception_types[type(e).__name__] += 1
-            
-            return {
-                'request_id': request_id,
-                'status_code': None,
-                'response_time': None,
-                'proxy_port': 'unknown',
-                'result_type': 'connection_error',
-                'error': 'Connection failed',
-                'exception_type': type(e).__name__,
-                'timestamp': int(time.time()),
-                'url': url
-            }
-            
-        except requests.exceptions.ProxyError as e:
+
+        except (socks.ProxyError, socks.GeneralProxyError, socks.SOCKS5Error, socks.SOCKS4Error) as e:
             with self.lock:
                 self.response_codes['PROXY_ERROR'] += 1
                 self.request_timestamps.append(time.time())
                 self.exception_types[type(e).__name__] += 1
-            
+
             return {
                 'request_id': request_id,
                 'status_code': None,
                 'response_time': None,
-                'proxy_port': 'unknown',
+                'proxy_port': str(self.proxy_port),
                 'result_type': 'proxy_error',
                 'error': str(e)[:100],
                 'exception_type': type(e).__name__,
                 'timestamp': int(time.time()),
                 'url': url
             }
-            
-        except requests.exceptions.Timeout as e:
+
+        except socket.timeout as e:
             with self.lock:
                 self.response_codes['TIMEOUT'] += 1
                 self.request_timestamps.append(time.time())
                 self.exception_types[type(e).__name__] += 1
-            
+
             return {
                 'request_id': request_id,
                 'status_code': None,
                 'response_time': None,
-                'proxy_port': 'unknown',
+                'proxy_port': str(self.proxy_port),
                 'result_type': 'timeout',
                 'error': 'Request timeout',
                 'exception_type': type(e).__name__,
                 'timestamp': int(time.time()),
                 'url': url
             }
-        except requests.exceptions.ChunkedEncodingError as e:
+
+        except (socket.error, RemoteDisconnected) as e:
             with self.lock:
-                self.response_codes['CHUNKED_ENCODING_ERROR'] += 1
+                self.response_codes['CONNECTION_ERROR'] += 1
                 self.request_timestamps.append(time.time())
                 self.exception_types[type(e).__name__] += 1
-            
+
             return {
                 'request_id': request_id,
                 'status_code': None,
                 'response_time': None,
-                'proxy_port': 'unknown',
+                'proxy_port': str(self.proxy_port),
+                'result_type': 'connection_error',
+                'error': str(e)[:100],
+                'exception_type': type(e).__name__,
+                'timestamp': int(time.time()),
+                'url': url
+            }
+
+        except IncompleteRead as e:
+            with self.lock:
+                self.response_codes['CHUNKED_ENCODING_ERROR'] += 1
+                self.request_timestamps.append(time.time())
+                self.exception_types[type(e).__name__] += 1
+
+            return {
+                'request_id': request_id,
+                'status_code': None,
+                'response_time': None,
+                'proxy_port': str(self.proxy_port),
                 'result_type': 'chunked_encoding_error',
                 'error': 'Chunked transfer terminated',
                 'exception_type': type(e).__name__,
                 'timestamp': int(time.time()),
                 'url': url
             }
-            
-        except (requests.exceptions.ContentDecodingError, UnicodeDecodeError) as e:
+
+        except ssl.SSLError as e:
             with self.lock:
-                self.response_codes['DECODE_ERROR'] += 1
+                self.response_codes['OTHER_ERROR'] += 1
                 self.request_timestamps.append(time.time())
                 self.exception_types[type(e).__name__] += 1
-            
+
             return {
                 'request_id': request_id,
                 'status_code': None,
                 'response_time': None,
-                'proxy_port': 'unknown',
-                'result_type': 'decode_error',
-                'error': f'Content decode error: {str(e)[:80]}',
+                'proxy_port': str(self.proxy_port),
+                'result_type': 'exception',
+                'error': str(e)[:100],
                 'exception_type': type(e).__name__,
                 'timestamp': int(time.time()),
                 'url': url
             }
-            
+
         except Exception as e:
             with self.lock:
                 self.response_codes['OTHER_ERROR'] += 1
                 self.request_timestamps.append(time.time())
                 self.exception_types[type(e).__name__] += 1
-            
+
             return {
                 'request_id': request_id,
                 'status_code': None,
                 'response_time': None,
-                'proxy_port': 'unknown',
+                'proxy_port': str(self.proxy_port),
                 'result_type': 'exception',
                 'error': str(e)[:100],
                 'exception_type': type(e).__name__,
@@ -311,7 +376,7 @@ class ProxyTester:
         print("=" * 90)
         print(f"🚀 STEAM MARKET PROXY TESTER {'(MULTI-THREADED)' if self.threads > 1 else '(SEQUENTIAL)'}")
         print("=" * 90)
-        print(f"Proxy: {self.proxy_url}")
+        print(f"Proxy: {self.proxy_display}")
         print(f"Total requests: {self.total_requests}")
         print(f"Delay between requests: {self.delay}s")
         print(f"Threads: {self.threads}")
@@ -361,6 +426,26 @@ class ProxyTester:
         time.sleep(2)
         self.show_final_results(elapsed)
 
+    def calculate_rpm(self, timestamps, duration_minutes=5):
+        if len(timestamps) <= 1:
+            return 0
+        
+        current_time = time.time()
+        cutoff_time = current_time - (duration_minutes * 60)
+        
+        recent_requests = [t for t in timestamps if t >= cutoff_time]
+        
+        if len(recent_requests) <= 1:
+            return 0
+            
+        actual_duration = (timestamps[-1] - timestamps[0]) / 60
+        rpm = len(recent_requests) / actual_duration if actual_duration > 0 else 0
+        
+        # Clean up old timestamps to prevent memory leak
+        timestamps[:] = recent_requests
+        
+        return rpm
+
     def show_final_results(self, elapsed):
         self.clear_screen()
         total_requests = len(self.results)
@@ -401,10 +486,6 @@ class ProxyTester:
                 print(f"  {name}: {count}")
                 
         print("-" * 90)
-        print("🚀 PERFORMANCE METRICS:")
-        print(f"📊 Total RPM:            {total_rpm:>6.1f} requests/minute")
-        print(f"✅ Success RPM (200):    {success_rpm:>6.1f} requests/minute")
-        
         if total_requests > 0:
             successful_requests = [r for r in self.results if r.get('response_time') is not None and r.get('status_code') == 200]
             if successful_requests:
@@ -412,6 +493,10 @@ class ProxyTester:
                 total_bytes = sum(r.get('content_length', 0) for r in successful_requests)
                 print(f"⏱️ Average response time: {avg_response_time:.3f}s")
                 print(f"📦 Total data received: {total_bytes:,} bytes")
+        print("-" * 90)
+        print("🚀 PERFORMANCE METRICS:")
+        print(f"📊 Total RPM:            {total_rpm:>6.1f} requests/minute")
+        print(f"✅ Success RPM (200):    {success_rpm:>6.1f} requests/minute")
         print("=" * 90)
 
 def main():
