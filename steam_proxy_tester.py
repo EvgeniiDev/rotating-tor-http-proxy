@@ -424,7 +424,7 @@ class ProxyTester:
         time.sleep(2)
         self.show_final_results(elapsed)
 
-    def calculate_rpm(self, timestamps, duration_minutes=5):
+    def calculate_rpm(self, timestamps, duration_minutes=2):
         if len(timestamps) <= 1:
             return 0
         
