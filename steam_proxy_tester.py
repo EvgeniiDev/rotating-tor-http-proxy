@@ -382,8 +382,6 @@ class ProxyTester:
         print(f"Threads: {self.threads}")
         print(f"Target URLs: {len(self.target_urls)} Steam market listing URLs")
         print("=" * 90)
-        print("⏳ Starting test in 3 seconds...")
-        time.sleep(3)
         
         start_time = time.time()
         
