@@ -1,171 +1,80 @@
-import logging
-import requests
-from typing import List, Dict, Optional
-from utils import is_valid_ipv4
+from __future__ import annotations
 
-logger = logging.getLogger(__name__)
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+
+import aiohttp
+
+from config_manager import TorProxySettings
+from logging_utils import get_logger
+
+_ONIONOO_SUMMARY_URL = "https://onionoo.torproject.org/summary"  # nosec B105
+
+
+@dataclass(frozen=True)
+class RelayNode:
+    fingerprint: str
+    address: str
+    bandwidth: int
+
 
 class TorRelayManager:
-    """
-    Отвечает за получение списка Tor релеев и извлечение exit-нод.
-    
-    Логика:
-    - Загружает данные о Tor релеях из официальных источников
-    - Фильтрует и валидирует exit-ноды по критериям (IPv4, политика выхода)
-    - Предоставляет списки exit-нод для распределения между Tor процессами
-    """
-    __slots__ = ('current_relays', 'exit_nodes_by_probability')
-    
-    def __init__(self):
-        self.current_relays = []
-        self.exit_nodes_by_probability = []
-    
-    def fetch_tor_relays(self) -> Optional[Dict]:
-        url = (
-            "https://onionoo.torproject.org/details?type=relay&running=true&fields="
-            "or_addresses,country,exit_probability,exit_policy_summary,last_seen,uptime,flags,observed_bandwidth"
-        )
-        try:
-            response = requests.get(url, timeout=30)
+    """Retrieve and manage Tor exit nodes from public directory authorities."""
+
+    def __init__(self, settings: TorProxySettings, client: Optional[aiohttp.ClientSession] = None) -> None:
+        self._settings = settings
+        self._client = client or aiohttp.ClientSession()
+        self._logger = get_logger("relay")
+
+    async def fetch_exit_relays(self, limit: Optional[int] = None) -> List[RelayNode]:
+        params = {"limit": limit} if limit is not None else None
+        async with self._client.get(_ONIONOO_SUMMARY_URL, params=params) as response:
             response.raise_for_status()
-            return response.json()
-        except requests.RequestException as e:
-            logger.error(f"Failed to fetch Tor relays: {e}")
-            return None
+            payload = await response.json()
+            relays: List[RelayNode] = []
+            for relay in payload.get("relays", []):
+                if "Exit" not in relay.get("flags", []):
+                    continue
+                bandwidth = int(relay.get("observed_bandwidth", relay.get("bandwidth", 0)))
+                for address in relay.get("addresses", relay.get("a", [])):
+                    relays.append(
+                        RelayNode(
+                            fingerprint=relay.get("fingerprint", ""),
+                            address=address,
+                            bandwidth=bandwidth,
+                        )
+                    )
+            relays.sort(key=lambda relay: relay.bandwidth, reverse=True)
+            if limit is not None:
+                return relays[:limit]
+            return relays
 
-    def extract_relay_ips(self, relay_data: Dict) -> List[Dict]:
-        if not relay_data or 'relays' not in relay_data:
-            return []
-
-        exit_nodes = []
-        seen_ips = set()
-
-        for relay in relay_data['relays']:
-            flags = relay.get('flags', [])
-            if 'Exit' not in flags:
-                continue
-
-            exit_prob = relay.get('exit_probability', 0)
-            if not (isinstance(exit_prob, (int, float)) and exit_prob > 0):
-                continue
-
-            # exit_policy = relay.get('exit_policy_summary', {})
-            # if not self._check_exit_policy_for_web_traffic(exit_policy):
-            #     continue
-
-            # if not self._check_node_stability(relay):
-            #     continue
-
-            for addr in relay.get('or_addresses', []):
-                ip = addr.split(':')[0]
-                if is_valid_ipv4(ip) and ip not in seen_ips:
-                    seen_ips.add(ip)
-                    exit_nodes.append({
-                        'ip': ip,
-                        'country': relay.get('country', 'Unknown'),
-                        'exit_probability': exit_prob,
-                        'observed_bandwidth': relay.get('observed_bandwidth', 0),
-                        'flags': flags,
-                        'uptime': relay.get('uptime', 0),
-                        'last_seen': relay.get('last_seen', ''),
-                        # 'exit_policy_summary': exit_policy
-                    })
-                    break
-
-        # Сортируем ноды по пропускной способности (от высокой к низкой)
-        exit_nodes.sort(key=lambda x: x['observed_bandwidth'], reverse=True)
-        
-        logger.info(f"Found {len(exit_nodes)} qualified exit nodes after filtering")
-
-        self.current_relays = exit_nodes
-        self.exit_nodes_by_probability = exit_nodes
-        return exit_nodes
-
-    def distribute_exit_nodes(self, num_processes: int) -> Dict[int, List[str]]:
-        if not self.exit_nodes_by_probability:
-            logger.warning("No exit nodes available for distribution")
+    async def distribute_exit_nodes(self, instance_count: int) -> Dict[int, List[str]]:
+        if instance_count <= 0:
             return {}
-        return self.distribute_exit_nodes_for_specific_instances(
-            list(range(num_processes)), self.exit_nodes_by_probability
-        )
+        nodes_per_instance = self._settings.exit_nodes_per_instance
+        max_nodes = self._settings.exit_nodes_max
+        total_needed = 0
+        if nodes_per_instance > 0:
+            total_needed = nodes_per_instance * instance_count
+        elif max_nodes > 0:
+            total_needed = max_nodes
 
-    def distribute_exit_nodes_for_specific_instances(self, process_ids: List[int], available_nodes: List[Dict]) -> Dict[int, Dict]:
-        if not available_nodes:
-            logger.warning("No available nodes for distribution")
-            return {}
+        limit = total_needed if total_needed > 0 else None
+        relays = await self.fetch_exit_relays(limit=limit)
+        mapping: Dict[int, List[str]] = {index: [] for index in range(instance_count)}
+        if not relays or nodes_per_instance == 0:
+            return mapping
+        cursor = 0
+        available = len(relays)
+        for instance_id in range(instance_count):
+            selection: List[str] = []
+            for _ in range(nodes_per_instance):
+                address = relays[cursor % available].address
+                selection.append(address)
+                cursor += 1
+            mapping[instance_id] = selection
+        return mapping
 
-        num_processes = len(process_ids)
-        max_nodes_per_process = 25
-        process_distributions = {pid: {'exit_nodes': [], 'total_probability': 0.0, 'node_count': 0} for pid in process_ids}
-
-        # Разделяем ноды на равные группы по вероятности
-        nodes_per_process = len(available_nodes) // num_processes
-        remainder = len(available_nodes) % num_processes
-
-        start_idx = 0
-        for i, process_id in enumerate(process_ids):
-            # Определяем количество нод для текущего процесса
-            current_nodes_count = nodes_per_process + (1 if i < remainder else 0)
-            
-            # Берем ноды для текущего процесса
-            end_idx = start_idx + current_nodes_count
-            process_nodes = available_nodes[start_idx:end_idx]
-            
-            # Добавляем ноды в процесс (с учетом лимита max_nodes_per_process)
-            for node in process_nodes:
-                if process_distributions[process_id]['node_count'] < max_nodes_per_process:
-                    process_distributions[process_id]['exit_nodes'].append(node['ip'])
-                    process_distributions[process_id]['total_probability'] += node['exit_probability']
-                    process_distributions[process_id]['node_count'] += 1
-            
-            start_idx = end_idx
-
-        total_distributed = sum(data['node_count'] for data in process_distributions.values())
-        logger.info(f"Distributed {total_distributed} nodes across {num_processes} processes")
-
-        if not self.validate_distribution_uniqueness(process_distributions):
-            logger.error("Distribution validation failed - duplicate IPs detected")
-            return {}
-
-        return process_distributions
-
-    def validate_distribution_uniqueness(self, distributions: Dict[int, Dict]) -> bool:
-        all_assigned_ips = [ip for data in distributions.values() for ip in data.get('exit_nodes', [])]
-        unique_ips = set(all_assigned_ips)
-        if len(all_assigned_ips) != len(unique_ips):
-            ip_counts = {}
-            for ip in all_assigned_ips:
-                ip_counts[ip] = ip_counts.get(ip, 0) + 1
-            duplicates = [(ip, count) for ip, count in ip_counts.items() if count > 1]
-            logger.error(f"Found {len(all_assigned_ips) - len(unique_ips)} duplicate IP assignments:")
-            for ip, count in duplicates[:5]:
-                logger.error(f"  IP {ip} assigned {count} times")
-            return False
-        return True
-
-    def _check_exit_policy_for_web_traffic(self, exit_policy: Dict) -> bool:
-        if not exit_policy:
-            return False
-        accepts = exit_policy.get('accept', [])
-        rejects = exit_policy.get('reject', [])
-        if accepts:
-            for rule in accepts:
-                if rule == '443':
-                    return True
-                if '-' in rule:
-                    try:
-                        start, end = map(int, rule.split('-'))
-                        if 443 >= start and 443 <= end:
-                            return True
-                    except Exception:
-                        pass
-            return False
-        if not accepts and rejects:
-            for rule in rejects:
-                if rule == '1-65535':
-                    return False
-        return False
-
-    def _check_node_stability(self, relay: Dict) -> bool:
-        flags = relay.get('flags', [])
-        return 'Running' in flags
+    async def close(self) -> None:
+        await self._client.close()

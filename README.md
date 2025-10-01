@@ -1,77 +1,113 @@
-# Tor HTTP Proxy
+# Rotating Tor HTTP Proxy v2
 
-HTTP прокси-сервер с автоматической балансировкой нагрузки через множественные Tor инстансы.
+High-performance orchestrator for a pool of Tor processes fronted by mitmproxy. The
+system creates isolated Tor instances with unique exit nodes, keeps them healthy,
+configures mitmproxy for smart load balancing with retry logic
 
-Нативная реализация на Python работает эффективнее Docker-решений при тех же ресурсах.
+## Features
+- Parallel launch of up to 400 Tor instances with automatic port allocation
+- Exit node discovery from Onionoo and even distribution across the pool
+- mitmproxy configuration generation (HTTP proxy :8080)
+- Passive and active health checks with automatic restarts on failure
+- Graceful shutdown, resource cleanup, and systemd service template
+- Structured logging, environment-driven configuration, and test coverage
 
-## Компоненты
+## Requirements
+- Linux host with `tor` package (`scripts/install_dependencies.sh`)
+- Python 3.12+
+- Optional: `systemd` for service management
 
-- **HAProxy Load Balancer** — готовый балансировщик, автоматически настраиваемый под активные Tor-инстансы
-- **Tor Parallel Runner** — параллельный запуск и мониторинг Tor процессов
-- **Tor↔HAProxy Integrator** — координация жизненного цикла и синхронизация конфигураций
+## Installation
 
-## Архитектура
-
-```
-HTTP Client → HAProxy SOCKS5 Frontend:9999 → Tor Instances:10000+ → Internet
-```
-
-## Установка
-
+### System Dependencies
+First, install the required system packages:
 ```bash
-git clone <repository>
-cd rotating-tor-http-proxy
-sudo ./install_ubuntu.sh
+# Install Tor
+sudo apt update
+sudo apt install -y tor
 ```
 
-## Использование
+### Python Dependencies
+The project uses a modern Python package structure. You can install it in two ways:
 
-### HAProxy + Tor пул
+1. **Direct installation** (recommended for production):
 ```bash
-python src/main.py --tor-count 5 --frontend-port 9999
+# Install the package
+pip install -e .
 ```
 
-Скрипт запускает указанный пул Tor-процессов, ждёт их успешного старта, собирает доступные порты и формирует конфигурацию `haproxy.cfg`. После проверки конфигурации HAProxy поднимается автоматически.
-
+## Quick Start
 ```bash
-curl --proxy socks5h://127.0.0.1:9999 https://httpbin.org/ip
+# Configure environment
+cp .env.example .env
+# adjust TOR_PROXY_* values as needed
+
+# Launch the orchestrator
+python -m rotating_tor_proxy.main --tor-instances 20
 ```
 
-### Параллельный запуск Tor процессов
-Запуск происходит параллельно (параметр `--tor-count`), конфигурация HAProxy пересобирается по мере изменения пула.
+The service binds mitmproxy on port 8080.
 
-### Тестирование параллельного запуска
+## Configuration
+All settings are exposed through environment variables (prefix `TOR_PROXY_`). Key
+options include:
+
+- `TOR_PROXY_TOR_INSTANCES` – number of Tor workers (≤ 400)
+- `TOR_PROXY_TOR_BASE_PORT` – starting port for SOCKS/Control allocation (default 10000)
+- `TOR_PROXY_TOR_START_BATCH` – max parallel startups per batch (default 20)
+- `TOR_PROXY_TOR_MAX_PORT` – upper bound for allocated SOCKS/Control ports (default 10799)
+- `TOR_PROXY_EXIT_NODES_PER_INSTANCE` – fixed number of exit nodes per Tor instance
+- `TOR_PROXY_EXIT_NODES_MAX` – global cap on exit nodes fetched
+- `TOR_PROXY_HEALTH_CHECK_URL` – URL fetched via each Tor circuit (default httpbin)
+- `TOR_PROXY_HEALTH_INTERVAL_SECONDS` – cadence for background health sampling
+- `TOR_PROXY_LOG_LEVEL` – `DEBUG`, `INFO`, etc.
+
+Adjust `.env` to tune these values. Relative paths resolve against the current
+working directory.
+
+## Monitoring & Operations
+- **Runtime Stats API**: use `TorProxyIntegrator.get_stats()` (see unit tests for
+parsing) if integrating with external dashboards.
+- **Logs**: structured via Python logging; enable verbose traces using
+`TOR_PROXY_LOG_VERBOSE=true`.
+
+Scheduled health cycles run in a background thread. Failing Tor workers are
+immediately restarted and mitmproxy config is refreshed when topology changes.
+
+## Systemd Integration
+A service unit template is provided at `systemd/rotating-tor-http-proxy.service`.
+We've enhanced the service with CPU and memory limits for better resource management.
+
+# Install Python package
+cd /opt/rotating-tor-http-proxy
+sudo -u torproxy pip install -e .
+
+Logs stream through `journalctl -u rotating-tor-http-proxy`.
+
+## Testing & Tooling
 ```bash
-python test_parallel_startup.py
+make test
+make lint
 ```
 
-### Управление через systemd
-```bash
-sudo systemctl start tor-http-proxy
-sudo systemctl stop tor-http-proxy
-sudo systemctl status tor-http-proxy
-```
+The `Makefile` wraps common actions (`make install`, `make lint`, `make test`, `make run`).
 
-## Порты
+## Project Layout
+- `src/config_manager.py` – Configuration management and validation
+- `src/tor_process.py` – Tor instance lifecycle management
+- `src/tor_parallel_runner.py` – Concurrent orchestration of Tor instances
+- `src/tor_relay_manager.py` – Onionoo integration for exit node discovery
+- `src/mitmproxy_pool_manager.py` – mitmproxy configuration & launch
+- `src/tor_proxy_integrator.py` – High-level coordinator
+- `src/main.py` – Main entry point
+- `src/exceptions.py` – Custom exception definitions
+- `src/logging_utils.py` – Logging configuration
+- `src/utils.py` – Utility functions
+- `src/mitm_addon/` – mitmproxy balancer addon implementation
 
-- **9999 (по умолчанию)** — SOCKS5 фронтенд HAProxy
-- **8404 (по умолчанию)** — веб-интерфейс статистики HAProxy
-- **10000+** — порты Tor-инстансов (подбираются динамически)
-
-## Производительность
-
-### Параллельный запуск
-- **Последовательный запуск**: ~2-3 секунды на процесс
-- **Параллельный запуск (10 процессов)**: ~10-15 секунд для 50 процессов
-- **Ускорение**: в 3-5 раз быстрее
-
-### Ограничения
-- Максимум 10 одновременно запускаемых Tor процессов
-- Автоматическое перераспределение узлов при сбоях
-- Мониторинг здоровья процессов
-
-## Логи
-
-```bash
-journalctl -u tor-http-proxy -f
-```
+## Safety Notes
+- Run under a dedicated user with minimal privileges (`torproxy` suggested)
+- Ensure `tor` binary is present; otherwise reload/validation steps
+are skipped with warnings
+- Monitor memory usage (~40 MB per Tor process per spec) and adjust instance count accordingly
+- The systemd service includes CPU and memory limits to prevent resource exhaustion

@@ -32,6 +32,7 @@ class ProxyTester:
         self.success_timestamps = []
         self.lock = threading.Lock()
         self.exception_types = defaultdict(int)
+        self._sockets = threading.local()
         
         self.target_urls = [
             "https://steamcommunity.com/market/listings/730/AK-47%20|%20Redline%20(Field-Tested)",
@@ -163,12 +164,30 @@ class ProxyTester:
         if parsed.query:
             path += f"?{parsed.query}"
 
+        # Get or create persistent socket for this thread
+        if not hasattr(self._sockets, 'wrapped_sock') or self._sockets.wrapped_sock is None:
+            sock = self._open_proxy_socket(host, port, timeout)
+            if parsed.scheme == "https":
+                context = ssl.create_default_context()
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+                wrapped_sock = context.wrap_socket(sock, server_hostname=host)
+            else:
+                wrapped_sock = sock
+            self._sockets.wrapped_sock = wrapped_sock
+            self._sockets.sock = sock
+        else:
+            wrapped_sock = self._sockets.wrapped_sock
+            sock = self._sockets.sock
+
+        wrapped_sock.settimeout(timeout)
+
         request_headers = dict(headers)
         host_header = host
         if (parsed.scheme == "http" and port != 80) or (parsed.scheme == "https" and port != 443):
             host_header = f"{host}:{port}"
         request_headers["Host"] = host_header
-        request_headers["Connection"] = "close"
+        request_headers["Connection"] = "keep-alive"
         request_headers.setdefault("Accept-Encoding", "identity")
 
         request_lines = [f"GET {path} HTTP/1.1"]
@@ -176,18 +195,8 @@ class ProxyTester:
         request_bytes = ("\r\n".join(request_lines) + "\r\n\r\n").encode("utf-8")
 
         start_time = time.time()
-        sock = None
-        wrapped_sock = None
         response = None
         try:
-            sock = self._open_proxy_socket(host, port, timeout)
-            wrapped_sock = sock
-            if parsed.scheme == "https":
-                context = ssl.create_default_context()
-                context.check_hostname = False  # allow testing against proxies with self-signed certs
-                context.verify_mode = ssl.CERT_NONE
-                wrapped_sock = context.wrap_socket(sock, server_hostname=host)
-
             wrapped_sock.sendall(request_bytes)
 
             response = HTTPResponse(wrapped_sock)
@@ -201,17 +210,34 @@ class ProxyTester:
             if isinstance(body, bytes):
                 body = body.decode('utf-8', errors='replace')
 
-            return status, headers_map, body, elapsed
-        finally:
-            if response is not None:
-                with contextlib.suppress(Exception):
-                    response.close()
-            if wrapped_sock is not None:
+            # Detach fp to prevent response.close() from closing the socket
+            if response.fp:
+                response.fp = None
+
+            # Check if server wants to close the connection
+            conn_header = ''
+            for key, value in response.getheaders():
+                if key.lower() == 'connection':
+                    conn_header = value.lower()
+                    break
+            close_connection = 'close' in conn_header
+
+            if close_connection:
                 with contextlib.suppress(Exception):
                     wrapped_sock.close()
-            if sock is not None and sock is not wrapped_sock:
+                self._sockets.wrapped_sock = None
+                self._sockets.sock = None
+
+            return status, headers_map, body, elapsed
+
+        except Exception as exc:
+            # Close connection on error
+            if hasattr(self._sockets, 'wrapped_sock') and self._sockets.wrapped_sock is not None:
                 with contextlib.suppress(Exception):
-                    sock.close()
+                    self._sockets.wrapped_sock.close()
+                self._sockets.wrapped_sock = None
+                self._sockets.sock = None
+            raise exc
 
     def make_request(self, request_id, url):
         headers = {
@@ -219,7 +245,7 @@ class ProxyTester:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
             "Accept-Encoding": "identity",
-            "Connection": "close",
+            "Connection": "keep-alive",
             "Upgrade-Insecure-Requests": "1",
             "Sec-Fetch-Dest": "document",
             "Sec-Fetch-Mode": "navigate",

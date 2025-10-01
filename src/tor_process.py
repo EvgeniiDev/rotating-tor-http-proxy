@@ -1,147 +1,276 @@
-import subprocess
-import tempfile
-import os
-import time
-import shutil
-from typing import List
+from __future__ import annotations
+
+import json
 import signal
-import requests
-import logging
+import subprocess
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Iterable, Optional
 
+import aiohttp
+import asyncio
+from aiohttp_socks import ProxyConnector
+from aiohttp import ClientTimeout
+
+from exceptions import TorHealthCheckError, TorInstanceError
+from logging_utils import get_logger
+from utils import ensure_directory
+
+_TOR_STARTUP_GRACE_SECONDS = 45
+
+
+@dataclass
+class TorRuntimeMetadata:
+    socks_port: int
+    config_path: Path
+    data_dir: Path
+    log_path: Path
+    pid_file: Path
+
+
+@dataclass
 class TorInstance:
-    """
-    Отвечает за управление одним процессом Tor и мониторинг его состояния.
-    
-    Логика:
-    - Создает конфигурацию и запускает/останавливает процесс Tor
-    - Проверяет здоровье процесса через SOCKS соединение
-    - Поддерживает горячую перезагрузку exit-нод через SIGHUP без перезапуска
-    """
-    def __init__(self, port: int, exit_nodes: List[str], config_builder):
-        self.port = port
-        self.exit_nodes = exit_nodes
-        self.config_builder = config_builder
-        self.process = None
-        self.config_file = None
-        self.is_running = False
-        self.logger = logging.getLogger(__name__)
+    instance_id: int
+    tor_binary: str
+    metadata: TorRuntimeMetadata
+    exit_nodes: list[str]
+    health_check_url: str
+    health_timeout_seconds: float
+    max_health_retries: int
+    startup_timeout_seconds: float = field(default=_TOR_STARTUP_GRACE_SECONDS)
+    process: Optional[subprocess.Popen] = field(default=None, init=False)
 
-    def create_config(self):
-        temp_fd, self.config_file = tempfile.mkstemp(suffix='.torrc', prefix=f'tor_{self.port}_')
-        with os.fdopen(temp_fd, 'w') as f:
-            if self.exit_nodes:
-                config_content = self.config_builder.build_config(self.port, self.exit_nodes)
-            else:
-                config_content = self.config_builder.build_config_without_exit_nodes(self.port)
-            f.write(config_content)
-        return True
+    def __post_init__(self) -> None:
+        self._logger = get_logger(f"tor[{self.instance_id}]")
+        ensure_directory(self.metadata.data_dir)
+        ensure_directory(self.metadata.config_path.parent)
+        ensure_directory(self.metadata.pid_file.parent)
 
-    def start(self):
-        cmd = ['tor', '-f', self.config_file]
-        
+    @property
+    def config_path(self) -> Path:
+        return self.metadata.config_path
+
+    @property
+    def data_dir(self) -> Path:
+        return self.metadata.data_dir
+
+    @property
+    def log_path(self) -> Path:
+        return self.metadata.log_path
+
+    @property
+    def socks_port(self) -> int:
+        return self.metadata.socks_port
+
+    @property
+    def pid_file(self) -> Path:
+        return self.metadata.pid_file
+
+    def create_config(self) -> None:
+        lines: list[str] = [
+            f"SocksPort 127.0.0.1:{self.socks_port}",
+            f"DataDirectory {self.data_dir}",
+            f"Log notice file {self.log_path}",
+            f"PidFile {self.pid_file}",
+            "AvoidDiskWrites 1",
+            "MaxCircuitDirtiness 60",
+        ]
+        if self.exit_nodes:
+            exit_nodes_line = ",".join(self.exit_nodes)
+            lines.extend([
+                f"ExitNodes {exit_nodes_line}",
+                "StrictNodes 1",
+            ])
+        self.config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def start(self, env: Optional[dict[str, str]] = None) -> None:
+        if self.process and self.is_running:
+            raise TorInstanceError("Tor instance already running")
+        self.create_config()
+        lock_file = self.data_dir / "lock"
+        if lock_file.exists():
+            self._logger.info("Removing stale lock file %s", lock_file)
+            lock_file.unlink()
         try:
-            if hasattr(os, 'setsid'):
-                self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid, text=True)
-            else:
-                self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            
-            self.is_running = True
-            self.logger.info(f"Tor process started on port {self.port}, PID: {self.process.pid}")
-            
-            time.sleep(2)
-            
-            poll_result = self.process.poll()
-            if poll_result is not None:
-                stdout, stderr = self.process.communicate(timeout=5)
-                self.logger.error(f"Tor process on port {self.port} exited with code {poll_result}")
-                self.logger.error(f"STDOUT: {stdout}")
-                self.logger.error(f"STDERR: {stderr}")
-                self.is_running = False
-                return False
-            
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Failed to start Tor process on port {self.port}: {e}", exc_info=True)
+            self.process = subprocess.Popen(
+                [self.tor_binary, "-f", str(self.config_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+            self._logger.info("Starting Tor instance on port %s", self.socks_port)
+        except FileNotFoundError as error:  # pragma: no cover - system dependency
+            raise TorInstanceError("Tor binary not found") from error
+
+    async def wait_until_ready(self, timeout: Optional[float] = None) -> None:
+        effective_timeout = timeout if timeout is not None else self.startup_timeout_seconds
+        deadline = time.time() + effective_timeout
+        while time.time() < deadline:
+            if self.is_running and await self._socks_port_ready():
+                self._ensure_pid_file()
+                return
+            await asyncio.sleep(1)
+        exit_code = self.process.poll() if self.process else None
+        stderr_output = ""
+        stdout_output = ""
+        if self.process and exit_code is not None:
+            if self.process.stderr:
+                try:
+                    stderr_output = self.process.stderr.read().decode("utf-8", errors="ignore").strip()
+                except Exception:  # noqa: BLE001
+                    stderr_output = ""
+            if self.process.stdout:
+                try:
+                    stdout_output = self.process.stdout.read().decode("utf-8", errors="ignore").strip()
+                except Exception:  # noqa: BLE001
+                    stdout_output = ""
+            self.process = None
+        self._logger.error(
+            "Tor instance on port %s timed out after %.1fs (exit code: %s)",
+            self.socks_port,
+            effective_timeout,
+            exit_code if exit_code is not None else "running",
+        )
+        combined_output = (stderr_output or "")
+        if stdout_output:
+            combined_output = f"{combined_output}\n{stdout_output}" if combined_output else stdout_output
+        log_hint = f" Inspect {self.log_path} for details." if self.log_path else ""
+        message = f"Tor instance did not become ready within {effective_timeout:.1f} seconds.{log_hint}"
+        if exit_code is not None:
+            message = (
+                f"Tor instance exited with code {exit_code}: {combined_output or 'no additional output'}."
+                f"{log_hint}"
+            )
+        raise TorInstanceError(message)
+
+    async def _socks_port_ready(self) -> bool:
+        try:
+            response = await self._async_tor_get("https://check.torproject.org", 2.0)
+            return response.status == 200
+        except (aiohttp.ClientError, asyncio.TimeoutError):
             return False
 
-    def stop(self):
-        self.logger.info(f"Stopping Tor instance on port {self.port}")
-        
-        if self.process and self.process.poll() is None:
-            try:
-                self.process.terminate()
-                self.process.wait(timeout=10)
-                self.logger.info(f"Tor process on port {self.port} terminated gracefully")
-            except subprocess.TimeoutExpired:
-                self.logger.warning(f"Tor process on port {self.port} did not terminate, killing...")
-                self.process.kill()
-                self.process.wait()
-                self.logger.info(f"Tor process on port {self.port} killed")
-        
-        self.process = None
-        self.is_running = False
-        
-        if self.config_file and os.path.exists(self.config_file):
-            os.unlink(self.config_file)
-            self.config_file = None
-            
-        data_dir = os.path.expanduser(f'~/tor-http-proxy/data/data_{self.port}')
-        if os.path.exists(data_dir):
-            shutil.rmtree(data_dir, ignore_errors=True)
+    async def _async_tor_get(self, url: str, timeout_seconds: float) -> aiohttp.ClientResponse:
+        connector = ProxyConnector.from_url(f'socks5://127.0.0.1:{self.socks_port}')
+        timeout = ClientTimeout(total=timeout_seconds)
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+            async with session.get(url) as response:
+                return response
 
-    def check_health(self) -> bool:
+    @property
+    def is_running(self) -> bool:
+        return self.process is not None and self.process.poll() is None
+
+    def stop(self, timeout: float = 15.0) -> None:
         if not self.process:
-            self.logger.debug(f"Port {self.port}: No process to check")
-            return False
-            
-        poll_result = self.process.poll()
-        if poll_result is not None:
-            self.logger.warning(f"Port {self.port}: Process died with exit code {poll_result}")
-            self.is_running = False
-            return False
-        
-        url = 'https://api.ipify.org?format=json'
+            return
+        if not self.is_running:
+            return
+        self._logger.info("Stopping Tor instance on port %s", self.socks_port)
+        self.process.send_signal(signal.SIGINT)
         try:
-            response = requests.get(url, proxies=self.get_proxies(), timeout=60)
-            if response.status_code == 200:
-                return True
-        except Exception as e:
-            self.logger.debug(f"Port {self.port}: Health check failed: {e}")
-            pass
-        return False
+            self.process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self._logger.warning("Force killing Tor instance on port %s", self.socks_port)
+            self.process.kill()
+        finally:
+            self.process = None
+            self._cleanup_pid_file()
+            lock_file = self.data_dir / "lock"
+            try:
+                if lock_file.exists():
+                    lock_file.unlink()
+            except Exception:
+                pass
 
-    def get_proxies(self) -> dict:
-        return {'http': f'socks5://127.0.0.1:{self.port}', 'https': f'socks5://127.0.0.1:{self.port}'}
+    def force_kill(self) -> None:
+        if self.process and self.is_running:
+            self.process.kill()
+            self.process = None
+            self._cleanup_pid_file()
+            lock_file = self.data_dir / "lock"
+            try:
+                if lock_file.exists():
+                    lock_file.unlink()
+            except Exception:
+                pass
 
-    def reconfigure(self, new_exit_nodes: List[str]) -> bool:
-        try:
-            self.logger.info(f"Reconfiguring port {self.port} with nodes: {new_exit_nodes}")
-            
-            if not self.process:
-                self.logger.error(f"Port {self.port}: No process found")
-                return False
-                
-            poll_result = self.process.poll()
-            if poll_result is not None:
-                self.logger.error(f"Port {self.port}: Process is not running (poll={poll_result})")
-                return False
-                
-            self.exit_nodes = new_exit_nodes
-            
-            with open(self.config_file, 'w') as f:
-                config_content = self.config_builder.build_config(self.port, new_exit_nodes)
-                f.write(config_content)
-            
+    def update_exit_nodes(self, exit_nodes: Iterable[str]) -> None:
+        self.exit_nodes = list(exit_nodes)
+        self.create_config()
+        if self.process and self.is_running:
             self.process.send_signal(signal.SIGHUP)
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Reconfiguration failed for port {self.port}: {e}", exc_info=True)
-            return False
+            self._logger.info("Reloaded exit nodes for port %s", self.socks_port)
 
-    def __del__(self):
+    def rotate_circuits(self) -> None:
+        if not self.is_running:
+            raise TorInstanceError("Tor process not running")
+        if not self.pid_file.exists():
+            self._ensure_pid_file()
+        command = [
+            self.tor_binary,
+            "--signal",
+            "NEWNYM",
+            "--PidFile",
+            str(self.pid_file),
+        ]
         try:
-            self.stop()
-        except Exception:
-            pass
+            subprocess.run(
+                command,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self._logger.info("Requested NEWNYM for port %s", self.socks_port)
+        except FileNotFoundError as error:  # pragma: no cover - system dependency
+            raise TorInstanceError("Tor binary not found") from error
+        except subprocess.CalledProcessError as error:
+            stderr = (error.stderr or "").strip()
+            stdout = (error.stdout or "").strip()
+            message = stderr or stdout or str(error)
+            raise TorInstanceError(f"Failed to rotate circuits: {message}") from error
+
+    async def perform_health_check(self) -> dict[str, str]:
+        if not self.is_running:
+            raise TorHealthCheckError("Tor process not running")
+        attempts = max(1, self.max_health_retries)
+        last_error: Optional[Exception] = None
+        for attempt in range(attempts):
+
+            try:
+                response = await self._async_tor_get(self.health_check_url, self.health_timeout_seconds)
+                response.raise_for_status()
+                return await response.json()
+            except (aiohttp.ClientError, asyncio.TimeoutError, json.JSONDecodeError) as error:
+                last_error = error
+                self._logger.warning(
+                    "Health check attempt %s/%s failed for port %s: %s",
+                    attempt + 1,
+                    attempts,
+                    self.socks_port,
+                    error,
+                )
+                await asyncio.sleep(2)
+        raise TorHealthCheckError("Health check failed") from last_error
+
+    def _ensure_pid_file(self) -> None:
+        if self.pid_file.exists():
+            return
+        if self.process and self.process.pid:
+            try:
+                self.pid_file.write_text(str(self.process.pid), encoding="utf-8")
+            except OSError as error:  # pragma: no cover - filesystem race
+                self._logger.warning(
+                    "Unable to persist pid file for port %s: %s", self.socks_port, error
+                )
+
+    def _cleanup_pid_file(self) -> None:
+        try:
+            self.pid_file.unlink(missing_ok=True)
+        except TypeError:  # pragma: no cover - Python < 3.8 fallback
+            try:
+                self.pid_file.unlink()
+            except FileNotFoundError:
+                pass

@@ -1,0 +1,20 @@
+[Unit]
+Description=Rotating Tor HTTP Proxy
+After=network.target
+
+[Service]
+Type=simple
+User=torproxy
+Group=torproxy
+WorkingDirectory=/opt/rotating-tor-http-proxy
+EnvironmentFile=/opt/rotating-tor-http-proxy/.env
+ExecStart=/usr/bin/python3 -m rotating_tor_proxy.main
+
+# Resource limits
+LimitCPU=2
+MemoryHigh=4.5G
+MemoryMax=5G
+CPUQuota=200%
+
+[Install]
+WantedBy=multi-user.target
