@@ -1,113 +1,86 @@
-# Rotating Tor HTTP Proxy v2
+# Rotating Tor HTTP Proxy
 
-High-performance orchestrator for a pool of Tor processes fronted by mitmproxy. The
-system creates isolated Tor instances with unique exit nodes, keeps them healthy,
-configures mitmproxy for smart load balancing with retry logic
+A high-performance orchestrator that manages a pool of Tor processes with mitmproxy load balancing.
 
-## Features
-- Parallel launch of up to 400 Tor instances with automatic port allocation
-- Exit node discovery from Onionoo and even distribution across the pool
-- mitmproxy configuration generation (HTTP proxy :8080)
-- Passive and active health checks with automatic restarts on failure
-- Graceful shutdown, resource cleanup, and systemd service template
-- Structured logging, environment-driven configuration, and test coverage
+## Key Components
 
-## Requirements
-- Linux host with `tor` package (`scripts/install_dependencies.sh`)
-- Python 3.12+
-- Optional: `systemd` for service management
+1. **Tor Process Manager** - Handles lifecycle of multiple isolated Tor instances
+2. **mitmproxy Balancer** - Provides HTTP proxy with intelligent load balancing across Tor SOCKS proxies
+3. **Relay Manager** - Fetches and distributes exit nodes from Onionoo directory
+4. **Health Monitor** - Performs continuous health checks and auto-restarts failed instances
 
-## Installation
+## Core Functionality
 
-### System Dependencies
-First, install the required system packages:
-```bash
-# Install Tor
-sudo apt update
-sudo apt install -y tor
-```
+- **Pool Management**: Runs up to 400 concurrent Tor instances with automatic port allocation
+- **Load Balancing**: Distributes requests across healthy Tor proxies with round-robin and retry logic
+- **Exit Node Control**: Configures specific exit nodes for each Tor instance
+- **Auto Recovery**: Monitors health and automatically restarts failed Tor processes
+- **Circuit Rotation**: Supports NEWNYM signal for IP rotation
 
-### Python Dependencies
-The project uses a modern Python package structure. You can install it in two ways:
+## Working Algorithms
 
-1. **Direct installation** (recommended for production):
-```bash
-# Install the package
-pip install -e .
-```
+### 1. Tor Pool Initialization
+1. Calculate required port range based on instance count
+2. Fetch exit nodes from Onionoo relay directory if configured
+3. Distribute exit nodes across instances
+4. Launch Tor processes in parallel batches
+5. Wait for each process to become ready (SOCKS port responsive)
+6. Start mitmproxy with all healthy SOCKS endpoints
+
+### 2. Load Balancing Algorithm
+1. Maintain a pool of SOCKS5 proxy endpoints with health status
+2. Round-robin selection of available proxies for each request
+3. Automatic retry mechanism with fallback to alternative proxies
+4. Cooldown period for failed proxies to prevent cascading failures
+5. Success-based health tracking to prioritize reliable proxies
+
+### 3. Health Monitoring
+1. Periodic background health checks to all Tor instances
+2. HTTP request to configured endpoint through each proxy
+3. Mark failed instances for restart
+4. Automatic restart of unresponsive processes
+5. Dynamic mitmproxy configuration update when topology changes
+
+### 4. Failure Recovery
+1. Detection of failed Tor processes
+2. Graceful shutdown of failed instances
+3. Immediate restart with same configuration
+4. Re-integration into proxy pool upon successful startup
 
 ## Quick Start
-```bash
-# Configure environment
-cp .env.example .env
-# adjust TOR_PROXY_* values as needed
 
-# Launch the orchestrator
+```bash
+# Install system dependencies
+sudo apt install tor python
+
+# Install Python package
+pip install -e .
+
+# Configure (optional)
+cp .env.example .env
+# Edit TOR_PROXY_TOR_INSTANCES and other settings
+
+# Run with 20 Tor instances
 python -m rotating_tor_proxy.main --tor-instances 20
 ```
 
-The service binds mitmproxy on port 8080.
+## Usage
 
-## Configuration
-All settings are exposed through environment variables (prefix `TOR_PROXY_`). Key
-options include:
+Once running, the proxy exposes:
+- HTTP proxy: `http://127.0.0.1:8080` (mitmproxy load balancer)
 
-- `TOR_PROXY_TOR_INSTANCES` – number of Tor workers (≤ 400)
-- `TOR_PROXY_TOR_BASE_PORT` – starting port for SOCKS/Control allocation (default 10000)
-- `TOR_PROXY_TOR_START_BATCH` – max parallel startups per batch (default 20)
-- `TOR_PROXY_TOR_MAX_PORT` – upper bound for allocated SOCKS/Control ports (default 10799)
-- `TOR_PROXY_EXIT_NODES_PER_INSTANCE` – fixed number of exit nodes per Tor instance
-- `TOR_PROXY_EXIT_NODES_MAX` – global cap on exit nodes fetched
-- `TOR_PROXY_HEALTH_CHECK_URL` – URL fetched via each Tor circuit (default httpbin)
-- `TOR_PROXY_HEALTH_INTERVAL_SECONDS` – cadence for background health sampling
-- `TOR_PROXY_LOG_LEVEL` – `DEBUG`, `INFO`, etc.
-
-Adjust `.env` to tune these values. Relative paths resolve against the current
-working directory.
-
-## Monitoring & Operations
-- **Runtime Stats API**: use `TorProxyIntegrator.get_stats()` (see unit tests for
-parsing) if integrating with external dashboards.
-- **Logs**: structured via Python logging; enable verbose traces using
-`TOR_PROXY_LOG_VERBOSE=true`.
-
-Scheduled health cycles run in a background thread. Failing Tor workers are
-immediately restarted and mitmproxy config is refreshed when topology changes.
-
-## Systemd Integration
-A service unit template is provided at `systemd/rotating-tor-http-proxy.service`.
-We've enhanced the service with CPU and memory limits for better resource management.
-
-# Install Python package
-cd /opt/rotating-tor-http-proxy
-sudo -u torproxy pip install -e .
-
-Logs stream through `journalctl -u rotating-tor-http-proxy`.
-
-## Testing & Tooling
+Test with curl:
 ```bash
-make test
-make lint
+# Via HTTP (load balanced)
+curl -x http://127.0.0.1:8080 https://httpbin.org/ip
 ```
 
-The `Makefile` wraps common actions (`make install`, `make lint`, `make test`, `make run`).
+## Configuration
 
-## Project Layout
-- `src/config_manager.py` – Configuration management and validation
-- `src/tor_process.py` – Tor instance lifecycle management
-- `src/tor_parallel_runner.py` – Concurrent orchestration of Tor instances
-- `src/tor_relay_manager.py` – Onionoo integration for exit node discovery
-- `src/mitmproxy_pool_manager.py` – mitmproxy configuration & launch
-- `src/tor_proxy_integrator.py` – High-level coordinator
-- `src/main.py` – Main entry point
-- `src/exceptions.py` – Custom exception definitions
-- `src/logging_utils.py` – Logging configuration
-- `src/utils.py` – Utility functions
-- `src/mitm_addon/` – mitmproxy balancer addon implementation
+Key environment variables:
+- `TOR_PROXY_TOR_INSTANCES` - Number of Tor workers (default: 20)
+- `TOR_PROXY_FRONTEND_PORT` - SOCKS5 proxy port (default: 9999)
+- `TOR_PROXY_EXIT_NODES_PER_INSTANCE` - Exit nodes per instance (default: 0)
+- `TOR_PROXY_HEALTH_CHECK_URL` - Health check endpoint (default: https://httpbin.org/ip)
 
-## Safety Notes
-- Run under a dedicated user with minimal privileges (`torproxy` suggested)
-- Ensure `tor` binary is present; otherwise reload/validation steps
-are skipped with warnings
-- Monitor memory usage (~40 MB per Tor process per spec) and adjust instance count accordingly
-- The systemd service includes CPU and memory limits to prevent resource exhaustion
+Set via `.env` file or environment variables.
