@@ -61,7 +61,7 @@ cp .env.example .env
 # Edit TOR_PROXY_TOR_INSTANCES and other settings
 
 # Run with 20 Tor instances
-python -m rotating_tor_proxy.main --tor-instances 20
+python3 -m src.main --tor-instances 20
 ```
 
 ## Usage
