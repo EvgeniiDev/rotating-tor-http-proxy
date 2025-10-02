@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from config_manager import TorProxySettings
+from .config_manager import TorProxySettings
 
 
 def configure_logging(settings: TorProxySettings) -> None:

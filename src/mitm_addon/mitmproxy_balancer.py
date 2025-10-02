@@ -3,7 +3,7 @@
 import time
 from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Sequence
-from ..logging_utils import get_logger
+from src.logging_utils import get_logger
 
 from mitmproxy import http
 from mitmproxy.http import Headers

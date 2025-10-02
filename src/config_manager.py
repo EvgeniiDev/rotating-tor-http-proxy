@@ -42,8 +42,8 @@ class TorProxySettings:
     tor_base_port: int = 10_000
     tor_max_port: int = 10_799
     tor_start_batch: int = 20
-    tor_start_timeout_seconds: float = 90.0
-    tor_start_retries: int = 2
+    tor_start_timeout_seconds: float = 120.0
+    tor_start_retries: int = 3
     tor_start_retry_delay_seconds: float = 5.0
     tor_data_dir: Path = Path("./data")
 

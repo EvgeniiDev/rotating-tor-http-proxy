@@ -13,9 +13,9 @@ import asyncio
 from aiohttp_socks import ProxyConnector
 from aiohttp import ClientTimeout
 
-from exceptions import TorHealthCheckError, TorInstanceError
-from logging_utils import get_logger
-from utils import ensure_directory
+from .exceptions import TorHealthCheckError, TorInstanceError
+from .logging_utils import get_logger
+from .utils import ensure_directory
 
 _TOR_STARTUP_GRACE_SECONDS = 45
 

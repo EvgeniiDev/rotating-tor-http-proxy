@@ -16,6 +16,8 @@ class PortAllocation:
 
 
 def _port_available(port: int) -> bool:
+    if port < 0 or port > 65535:
+        return False
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:

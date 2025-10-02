@@ -5,8 +5,8 @@ from typing import Dict, List, Optional
 
 import aiohttp
 
-from config_manager import TorProxySettings
-from logging_utils import get_logger
+from .config_manager import TorProxySettings
+from .logging_utils import get_logger
 
 _ONIONOO_SUMMARY_URL = "https://onionoo.torproject.org/summary"  # nosec B105
 

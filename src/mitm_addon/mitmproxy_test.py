@@ -6,7 +6,7 @@ from mitmproxy.options import Options
 from mitmproxy.tools.dump import DumpMaster
 
 # Fixed import - use absolute import instead of relative
-from mitm_addon.mitmproxy_balancer import MitmproxyBalancerAddon
+from .mitmproxy_balancer import MitmproxyBalancerAddon
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("test_mitmproxy")
